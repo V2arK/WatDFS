@@ -915,3 +915,149 @@ int watdfs_cli_utimensat(void *userdata, const char *path,
 
     return 0;
 }
+
+// --------------------------- P2 ---------------------------
+
+// 7.2.4
+
+// lock the file for transfering using the read or write lock_mode, respectively.
+int lock(const char *path, rw_lock_mode_t mode) {
+    // SET UP THE RPC CALL
+    DLOG("lock called for '%s'", path);
+
+    // getattr has 3 arguments.
+    int ARG_COUNT = 3;
+
+    // Allocate space for the output arguments.
+    void **args = new void *[ARG_COUNT];
+
+    // Allocate the space for arg types, and one extra space for the null
+    // array element.
+    int arg_types[ARG_COUNT + 1];
+
+    // The path has string length (strlen) + 1 (for the null character).
+    int pathlen = strlen(path) + 1;
+
+    // Fill in the arguments
+
+    // The first argument is the path, it is an input only argument, and a char
+    // array. The length of the array is the length of the path.
+    arg_types[0] =
+        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
+    // For arrays the argument is the array pointer, not a pointer to a pointer.
+    args[0] = (void *)path;
+
+    // Argument 2: mode (input, ARG_INT)
+    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+    args[1]      = (void *)&mode;
+
+    // Argument 3: return code (output, int)
+    int retcode  = 0;
+    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+    args[2]      = (void *)&retcode;
+
+    // Finally, the last position of the arg types is 0. There is no
+    // corresponding arg.
+    arg_types[3] = 0;
+
+    // MAKE THE RPC CALL
+    int rpc_ret = rpcCall((char *)"lock", arg_types, args);
+
+    // HANDLE THE RETURN
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    if (rpc_ret < 0) {
+        DLOG("lock rpc failed with error '%d'", rpc_ret);
+        // Something went wrong with the rpcCall, return a sensible return
+        // value. In this case lets return, -EINVAL
+        fxn_ret = -EINVAL;
+    } else {
+        // Our RPC call succeeded. However, it's possible that the return code
+        // from the server is not 0, that is it may be -errno. Therefore, we
+        // should set our function return value to the retcode from the server.
+
+        // TODO: set the function return value to the return code from the server.
+        fxn_ret = retcode; // Set function return value to the server's return cod
+    }
+
+    if (fxn_ret < 0) {
+        DLOG("lock failed with code: %d", fxn_ret);
+    }
+
+    // Clean up the memory we have allocated.
+    delete[] args;
+
+    // Finally return the value we got from the server.
+    return fxn_ret;
+}
+
+// unlock the file for transfering using the read or write lock_mode, respectively.
+int unlock(const char *path, rw_lock_mode_t mode) {
+    // SET UP THE RPC CALL
+    DLOG("unlock called for '%s'", path);
+
+    // getattr has 3 arguments.
+    int ARG_COUNT = 3;
+
+    // Allocate space for the output arguments.
+    void **args = new void *[ARG_COUNT];
+
+    // Allocate the space for arg types, and one extra space for the null
+    // array element.
+    int arg_types[ARG_COUNT + 1];
+
+    // The path has string length (strlen) + 1 (for the null character).
+    int pathlen = strlen(path) + 1;
+
+    // Fill in the arguments
+
+    // The first argument is the path, it is an input only argument, and a char
+    // array. The length of the array is the length of the path.
+    arg_types[0] =
+        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
+    // For arrays the argument is the array pointer, not a pointer to a pointer.
+    args[0] = (void *)path;
+
+    // Argument 2: mode (input, ARG_INT)
+    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+    args[1]      = (void *)&mode;
+
+    // Argument 3: return code (output, int)
+    int retcode  = 0;
+    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+    args[2]      = (void *)&retcode;
+
+    // Finally, the last position of the arg types is 0. There is no
+    // corresponding arg.
+    arg_types[3] = 0;
+
+    // MAKE THE RPC CALL
+    int rpc_ret = rpcCall((char *)"unlock", arg_types, args);
+
+    // HANDLE THE RETURN
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    if (rpc_ret < 0) {
+        DLOG("unlock rpc failed with error '%d'", rpc_ret);
+        // Something went wrong with the rpcCall, return a sensible return
+        // value. In this case lets return, -EINVAL
+        fxn_ret = -EINVAL;
+    } else {
+        // Our RPC call succeeded. However, it's possible that the return code
+        // from the server is not 0, that is it may be -errno. Therefore, we
+        // should set our function return value to the retcode from the server.
+
+        // TODO: set the function return value to the return code from the server.
+        fxn_ret = retcode; // Set function return value to the server's return cod
+    }
+
+    if (fxn_ret < 0) {
+        DLOG("unlock failed with code: %d", fxn_ret);
+    }
+
+    // Clean up the memory we have allocated.
+    delete[] args;
+
+    // Finally return the value we got from the server.
+    return fxn_ret;
+}

@@ -26,6 +26,9 @@
 #include <time.h>
 #include <unistd.h>
 
+// P2
+#include "rw_lock.h"
+
 #ifdef __cplusplus
 // This is for backward compatibility, but all your code *must* be in C++.
 extern "C" {

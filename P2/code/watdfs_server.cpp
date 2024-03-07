@@ -15,6 +15,9 @@ INIT_LOG
 #include <cstdlib>
 #include <fuse.h>
 
+// P2
+#include "rw_lock.h"
+
 // Global state server_persist_dir.
 char *server_persist_dir = nullptr;
 
@@ -453,6 +456,57 @@ int watdfs_utimensat(int *argTypes, void **args) {
     // The RPC call succeeded, so return 0.
     return 0;
 }
+
+// --------------------------- P2 ---------------------------
+
+// The server implementation of lock.
+int watdfs_lock(int *argTypes, void **args) {
+
+    // Get the arguments.
+
+    // The first argument is the path relative to the mountpoint.
+    char *short_path = (char *)args[0];
+
+    // The second argument is the rw_lock_mode_t mode.
+
+
+    // The third argument is the return code, which should be set be 0 or -errno.
+    int *ret = (int *)args[2];
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(short_path);
+
+    // Initially we set the return code to be 0.
+    *ret = 0;
+
+    return 0; // SPACE HOLDER
+}
+
+// The server implementation of unlock.
+int watdfs_unlock(int *argTypes, void **args) {
+    // Get the arguments.
+
+    // The first argument is the path relative to the mountpoint.
+    char *short_path = (char *)args[0];
+
+    // The second argument is the rw_lock_mode_t mode.
+
+    // The third argument is the return code, which should be set be 0 or -errno.
+    int *ret = (int *)args[2];
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(short_path);
+
+    // Initially we set the return code to be 0.
+    *ret = 0;
+
+    return 0; // SPACE HOLDER
+}
+// ------------------------------------------------------------
+// --------------------------- Main ---------------------------
+// ------------------------------------------------------------
 
 // The main function of the server.
 int main(int argc, char *argv[]) {
