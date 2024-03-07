@@ -1,0 +1,1784 @@
+cscope 15 $HOME/Library/CloudStorage/OneDrive-ä¸ªäºº/UWå¤§å­¦/3B/CS454/P1/provided-code               0000009341
+	@debug.h
+
+1 #iâdeà
+DEBUG_H
+
+
+2 
+	#DEBUG_H
+
+
+	)
+
+4 #ifdeà
+NDEBUG
+
+
+7 
+	#DLOG
+(...è(()0)
+
+	)
+
+9 
+	#INIT_LOG
+
+
+	)
+
+13 
+	~<±h»ad.h
+>
+
+14 
+	~<¡dio.h
+>
+
+16 
+±h»ad_mu‹x_t
+ 
+__nfs_debug_lock__
+;
+
+18 
+	#INIT_LOG
+ 
+±h»ad_mu‹x_t
+ 
+__nfs_debug_lock__
+ = 
+PTHREAD_MUTEX_INITIALIZER
+;
+
+	)
+
+20 
+	#DLOG
+(
+fmt
+, ...) \
+
+22 
+	`±h»ad_mu‹x_lock
+(&
+__nfs_debug_lock__
+); \
+
+23 
+	`årštf
+(
+¡d”r
+, "DEBUG %lu [%s:%d] ", 
+	`±h»ad_£lf
+(), 
+__FILE__
+, \
+
+24 
+__LINE__
+); \
+
+25 
+	`årštf
+(
+¡d”r
+, 
+fmt
+, ##
+__VA_ARGS__
+); \
+
+26 
+	`årštf
+(
+¡d”r
+, "\n"); \
+
+27 
+	`±h»ad_mu‹x_uÆock
+(&
+__nfs_debug_lock__
+); \
+
+28 } 0)
+
+	)
+
+	@rpc.h
+
+7 #iâdeà
+RPC_H
+
+
+8 
+	#RPC_H
+
+
+	)
+
+12 #ifdeà
+__ýlu¥lus
+
+
+19 
+	#ARG_CHAR
+ 1
+
+	)
+
+20 
+	#ARG_SHORT
+ 2
+
+	)
+
+21 
+	#ARG_INT
+ 3
+
+	)
+
+22 
+	#ARG_LONG
+ 4
+
+	)
+
+23 
+	#ARG_DOUBLE
+ 5
+
+	)
+
+24 
+	#ARG_FLOAT
+ 6
+
+	)
+
+27 
+	#ARG_INPUT
+ 31
+
+	)
+
+28 
+	#ARG_OUTPUT
+ 30
+
+	)
+
+29 
+	#ARG_ARRAY
+ 29
+
+	)
+
+32 
+	#MAX_ARRAY_LEN
+ 65535
+
+	)
+
+35 
+	#OK
+ 0
+
+	)
+
+36 
+	#ALREADY_EXISTS
+ -200
+
+	)
+
+37 
+	#NOT_INIT
+ -201
+
+	)
+
+38 
+	#FUNCTION_NOT_FOUND
+ -202
+
+	)
+
+39 
+	#FUNCTION_FAILURE
+ -203
+
+	)
+
+40 
+	#ARRAY_LENS_TOO_LONG
+ -204
+
+	)
+
+41 
+	#BAD_TYPES
+ -205
+
+	)
+
+42 
+	#TERMINATED
+ -300
+
+	)
+
+43 
+	#UNEXPECTED_MSG
+ -301
+
+	)
+
+44 
+	#FAILED_TO_SEND
+ -302
+
+	)
+
+47 (*
+sk–‘Ú
+)(*, **);
+
+52 
+½cS”v”In™
+();
+
+57 
+½cRegi¡”
+(*
+Çme
+, *
+¬gTy³s
+, 
+sk–‘Ú
+ 
+f
+);
+
+60 
+½cExecu‹
+();
+
+68 
+½cCl›ÁIn™
+();
+
+71 
+½cC®l
+(*
+Çme
+, *
+¬gTy³s
+, **
+¬gs
+);
+
+73 
+½cCl›ÁDe¡roy
+();
+
+75 #ifdeà
+__ýlu¥lus
+
+
+	@rw_lock.cpp
+
+7 
+	~"rw_lock.h
+"
+
+9 
+	~<”ºo.h
+>
+
+12 
+	#EINVAL_IF_NULL
+(
+l
+) \
+
+14 ià(
+l
+ =ð
+NULL
+) { \
+
+15  -
+EINVAL
+; \
+
+18 } 0)
+
+	)
+
+21 
+	#RETURN_IF_ERR
+(
+r
+) \
+
+23 ià(
+r
+ != 0) { \
+
+24  
+r
+; \
+
+27 } 0)
+
+	)
+
+29 
+	$rw_lock_š™
+(
+rw_lock_t
+ *
+lock
+) {
+
+30 
+	`EINVAL_IF_NULL
+(
+lock
+);
+
+32 
+»t
+ = 
+	`±h»ad_mu‹x_š™
+(&(
+lock
+->
+mu‹x_
+), 
+NULL
+);
+
+33 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+35 
+»t
+ = 
+	`±h»ad_cÚd_š™
+(&(
+lock
+->
+cv_
+), 
+NULL
+);
+
+36 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+38 
+lock
+->
+num_»ad”s_
+ = 0;
+
+39 
+lock
+->
+num_wr™”s_
+ = 0;
+
+40 
+lock
+->
+num_wa™šg_wr™”s_
+ = 0;
+
+42  
+»t
+;
+
+43 
+	}
+}
+
+45 
+	$rw_lock_de¡roy
+(
+rw_lock_t
+ *
+lock
+) {
+
+46 
+	`EINVAL_IF_NULL
+(
+lock
+);
+
+48 
+»t
+ = 
+	`±h»ad_mu‹x_de¡roy
+(&(
+lock
+->
+mu‹x_
+));
+
+49 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+51 
+»t
+ = 
+	`±h»ad_cÚd_de¡roy
+(&(
+lock
+->
+cv_
+));
+
+52 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+55 
+	}
+}
+
+57 
+	$rw_lock_lock
+(
+rw_lock_t
+ *
+lock
+, 
+rw_lock_mode_t
+ 
+mode
+) {
+
+58 
+	`EINVAL_IF_NULL
+(
+lock
+);
+
+60 
+»t
+ = 
+	`±h»ad_mu‹x_lock
+(&(
+lock
+->
+mu‹x_
+));
+
+61 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+63 ià(
+mode
+ =ð
+RW_READ_LOCK
+) {
+
+64 (
+lock
+->
+num_wr™”s_
+ > 0è|| (lock->
+num_wa™šg_wr™”s_
+ > 0)) {
+
+68 
+	`±h»ad_cÚd_wa™
+(&(
+lock
+->
+cv_
+), &Öock->
+mu‹x_
+));
+
+70 
+lock
+->
+num_»ad”s_
+ += 1;
+
+72 
+lock
+->
+num_wa™šg_wr™”s_
+ += 1;
+
+73 (
+lock
+->
+num_wr™”s_
+ > 0è|| (lock->
+num_»ad”s_
+ > 0)) {
+
+75 
+	`±h»ad_cÚd_wa™
+(&(
+lock
+->
+cv_
+), &Öock->
+mu‹x_
+));
+
+77 
+lock
+->
+num_wr™”s_
+ += 1;
+
+78 
+lock
+->
+num_wa™šg_wr™”s_
+ -= 1;
+
+81 
+»t
+ = 
+	`±h»ad_mu‹x_uÆock
+(&(
+lock
+->
+mu‹x_
+));
+
+82 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+85 
+	}
+}
+
+87 
+	$rw_lock_uÆock
+(
+rw_lock_t
+ *
+lock
+, 
+rw_lock_mode_t
+ 
+mode
+) {
+
+88 
+	`EINVAL_IF_NULL
+(
+lock
+);
+
+90 
+»t
+ = 
+	`±h»ad_mu‹x_lock
+(&(
+lock
+->
+mu‹x_
+));
+
+91 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+93 ià(
+mode
+ =ð
+RW_READ_LOCK
+) {
+
+94 ià(
+lock
+->
+num_»ad”s_
+ == 0) {
+
+96 
+»t
+ = 
+	`±h»ad_mu‹x_uÆock
+(&(
+lock
+->
+mu‹x_
+));
+
+97 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+98  -
+EPERM
+;
+
+100 
+lock
+->
+num_»ad”s_
+ -= 1;
+
+102 ià(
+lock
+->
+num_wr™”s_
+ == 0) {
+
+104 
+»t
+ = 
+	`±h»ad_mu‹x_uÆock
+(&(
+lock
+->
+mu‹x_
+));
+
+105 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+106  -
+EPERM
+;
+
+108 
+lock
+->
+num_wr™”s_
+ -= 1;
+
+112 
+	`±h»ad_cÚd_brßdÿ¡
+(&(
+lock
+->
+cv_
+));
+
+113 
+»t
+ = 
+	`±h»ad_mu‹x_uÆock
+(&(
+lock
+->
+mu‹x_
+));
+
+114 
+	`RETURN_IF_ERR
+(
+»t
+);
+
+117 
+	}
+}
+
+	@rw_lock.h
+
+7 #iâdeà
+RW_LOCK_H
+
+
+8 
+	#RW_LOCK_H
+
+
+	)
+
+10 
+	~<±h»ad.h
+>
+
+12 #ifdeà
+__ýlu¥lus
+
+
+19 
+	srw_lock
+ {
+
+21 
+±h»ad_mu‹x_t
+ 
+mu‹x_
+;
+
+23 
+±h»ad_cÚd_t
+ 
+cv_
+;
+
+26 
+num_»ad”s_
+;
+
+28 
+num_wr™”s_
+;
+
+30 
+num_wa™šg_wr™”s_
+;
+
+31 } 
+	trw_lock_t
+;
+
+35 
+	erw_lock_mode
+ { 
+RW_READ_LOCK
+, 
+RW_WRITE_LOCK
+ } 
+	trw_lock_mode_t
+;
+
+39 
+	#RW_LOCK_INITIALIZER
+ \
+
+40 { 
+PTHREAD_MUTEX_INITIALIZER
+, 
+PTHREAD_COND_INITIALIZER
+, 0, 0, 0 }
+
+	)
+
+47 
+rw_lock_š™
+(
+rw_lock_t
+ *
+lock
+);
+
+49 
+rw_lock_de¡roy
+(
+rw_lock_t
+ *
+lock
+);
+
+52 
+rw_lock_lock
+(
+rw_lock_t
+ *
+lock
+, 
+rw_lock_mode_t
+ 
+mode
+);
+
+55 
+rw_lock_uÆock
+(
+rw_lock_t
+ *
+lock
+, 
+rw_lock_mode_t
+ 
+mode
+);
+
+57 #ifdeà
+__ýlu¥lus
+
+
+	@watdfs_client.cpp
+
+6 
+	~"w©dfs_þ›Á.h
+"
+
+7 
+	~"debug.h
+"
+
+8 
+	gINIT_LOG
+
+
+10 
+	~"½c.h
+"
+
+13 *
+	$w©dfs_þi_š™
+(
+fu£_cÚn_šfo
+ *
+cÚn
+, cÚ¡ *
+·th_to_ÿche
+,
+
+14 
+time_t
+ 
+ÿche_š‹rv®
+, *
+»t_code
+) {
+
+31 *
+u£rd©a
+ = 
+nuÎ±r
+;
+
+39  
+u£rd©a
+;
+
+40 
+	}
+}
+
+42 
+	$w©dfs_þi_de¡roy
+(*
+u£rd©a
+) {
+
+45 
+	}
+}
+
+48 
+	$w©dfs_þi_g‘©Œ
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+¡©
+ *
+¡©buf
+) {
+
+50 
+	`DLOG
+("w©dfs_þi_g‘©Œ c®Ëd fÜ '%s'", 
+·th
+);
+
+53 
+ARG_COUNT
+ = 3;
+
+56 **
+¬gs
+ = 
+Ãw
+ *[
+ARG_COUNT
+];
+
+60 
+¬g_ty³s
+[
+ARG_COUNT
+ + 1];
+
+63 
+·thËn
+ = 
+	`¡¾’
+(
+·th
+) + 1;
+
+68 
+¬g_ty³s
+[0] =
+
+69 (1u << 
+ARG_INPUT
+è| (1u << 
+ARG_ARRAY
+è| (
+ARG_CHAR
+ << 16uè| (
+ušt
+è
+·thËn
+;
+
+71 
+¬gs
+[0] = (*)
+·th
+;
+
+76 
+¬g_ty³s
+[1] = (1u << 
+ARG_OUTPUT
+è| (1u << 
+ARG_ARRAY
+è| (
+ARG_CHAR
+ << 16u) |
+
+77 (
+ušt
+è(
+¡©
+);
+
+78 
+¬gs
+[1] = (*)
+¡©buf
+;
+
+84 
+»tcode
+;
+
+86 
+¬g_ty³s
+[2] = (1u << 
+ARG_OUTPUT
+è| (
+ARG_INT
+ << 16uè| (
+ušt
+) ();
+
+87 
+¬gs
+[2] = (*)&
+»tcode
+;
+
+96 
+¬g_ty³s
+[3] = 0;
+
+99 
+½c_»t
+ = 
+	`½cC®l
+((*)"g‘©Œ", 
+¬g_ty³s
+, 
+¬gs
+);
+
+103 
+fxn_»t
+ = 0;
+
+104 ià(
+½c_»t
+ < 0) {
+
+105 
+	`DLOG
+("g‘©Œ„pøçžed w™hƒ¼Ü '%d'", 
+½c_»t
+);
+
+108 
+fxn_»t
+ = -
+EINVAL
+;
+
+117 ià(
+fxn_»t
+ < 0) {
+
+121 
+	`mem£t
+(
+¡©buf
+, 0, (
+¡©
+));
+
+125 
+d–‘e
+ []
+¬gs
+;
+
+128  
+fxn_»t
+;
+
+129 
+	}
+}
+
+132 
+	$w©dfs_þi_mknod
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+mode_t
+ 
+mode
+, 
+dev_t
+ 
+dev
+) {
+
+134  -
+ENOSYS
+;
+
+135 
+	}
+}
+
+136 
+	$w©dfs_þi_Ý’
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+137 
+fu£_fže_šfo
+ *
+fi
+) {
+
+140  -
+ENOSYS
+;
+
+141 
+	}
+}
+
+143 
+	$w©dfs_þi_»Ëa£
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+144 
+fu£_fže_šfo
+ *
+fi
+) {
+
+146  -
+ENOSYS
+;
+
+147 
+	}
+}
+
+150 
+	$w©dfs_þi_»ad
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, *
+buf
+, 
+size_t
+ 
+size
+,
+
+151 
+off_t
+ 
+off£t
+, 
+fu£_fže_šfo
+ *
+fi
+) {
+
+156  -
+ENOSYS
+;
+
+157 
+	}
+}
+
+158 
+	$w©dfs_þi_wr™e
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, cÚ¡ *
+buf
+,
+
+159 
+size_t
+ 
+size
+, 
+off_t
+ 
+off£t
+, 
+fu£_fže_šfo
+ *
+fi
+) {
+
+164  -
+ENOSYS
+;
+
+165 
+	}
+}
+
+166 
+	$w©dfs_þi_Œunÿ‹
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+off_t
+ 
+Ãwsize
+) {
+
+168  -
+ENOSYS
+;
+
+169 
+	}
+}
+
+171 
+	$w©dfs_þi_fsync
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+172 
+fu£_fže_šfo
+ *
+fi
+) {
+
+174  -
+ENOSYS
+;
+
+175 
+	}
+}
+
+178 
+	$w©dfs_þi_utim’§t
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+179 cÚ¡ 
+time¥ec
+ 
+ts
+[2]) {
+
+181  -
+ENOSYS
+;
+
+182 
+	}
+}
+
+	@watdfs_client.h
+
+7 #iâdeà
+WATDFS_CLIENT_H
+
+
+8 
+	#WATDFS_CLIENT_H
+
+
+	)
+
+13 
+	#FUSE_USE_VERSION
+ 26
+
+	)
+
+15 
+	~<ùy³.h
+>
+
+16 
+	~<dœ’t.h
+>
+
+17 
+	~<”ºo.h
+>
+
+18 
+	~<fúŽ.h
+>
+
+19 
+	~<fu£.h
+>
+
+20 
+	~<libg’.h
+>
+
+21 
+	~<lim™s.h
+>
+
+22 
+	~<¡dio.h
+>
+
+23 
+	~<¡dlib.h
+>
+
+24 
+	~<¡ršg.h
+>
+
+25 
+	~<sys/ty³s.h
+>
+
+26 
+	~<time.h
+>
+
+27 
+	~<uni¡d.h
+>
+
+29 #ifdeà
+__ýlu¥lus
+
+
+35 *
+w©dfs_þi_š™
+(
+fu£_cÚn_šfo
+ *
+cÚn
+, cÚ¡ *
+·th_to_ÿche
+,
+
+36 
+time_t
+ 
+ÿche_š‹rv®
+, *
+»tcode
+);
+
+37 
+w©dfs_þi_de¡roy
+(*
+u£rd©a
+);
+
+40 
+w©dfs_þi_g‘©Œ
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+¡©
+ *
+¡©buf
+);
+
+43 
+w©dfs_þi_mknod
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+mode_t
+ 
+mode
+, 
+dev_t
+ 
+dev
+);
+
+44 
+w©dfs_þi_Ý’
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+45 
+fu£_fže_šfo
+ *
+fi
+);
+
+46 
+w©dfs_þi_»Ëa£
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+47 
+fu£_fže_šfo
+ *
+fi
+);
+
+50 
+w©dfs_þi_»ad
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, *
+buf
+, 
+size_t
+ 
+size
+,
+
+51 
+off_t
+ 
+off£t
+, 
+fu£_fže_šfo
+ *
+fi
+);
+
+52 
+w©dfs_þi_wr™e
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, cÚ¡ *
+buf
+,
+
+53 
+size_t
+ 
+size
+, 
+off_t
+ 
+off£t
+, 
+fu£_fže_šfo
+ *
+fi
+);
+
+54 
+w©dfs_þi_Œunÿ‹
+(*
+u£rd©a
+, cÚ¡ *
+·th
+, 
+off_t
+ 
+Ãwsize
+);
+
+55 
+w©dfs_þi_fsync
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+56 
+fu£_fže_šfo
+ *
+fi
+);
+
+59 
+w©dfs_þi_utim’§t
+(*
+u£rd©a
+, cÚ¡ *
+·th
+,
+
+60 cÚ¡ 
+time¥ec
+ 
+ts
+[2]);
+
+62 #ifdeà
+__ýlu¥lus
+
+
+	@watdfs_server.cpp
+
+6 
+	~"½c.h
+"
+
+7 
+	~"debug.h
+"
+
+8 
+	gINIT_LOG
+
+
+10 
+	~<sys/¡©.h
+>
+
+11 
+	~<sys/ty³s.h
+>
+
+12 
+	~<uni¡d.h
+>
+
+13 
+	~<”ºo.h
+>
+
+14 
+	~<c¡ršg
+>
+
+15 
+	~<c¡dlib
+>
+
+18 *
+	g£rv”_³rsi¡_dœ
+ = 
+nuÎ±r
+;
+
+29 *
+	$g‘_fuÎ_·th
+(*
+shÜt_·th
+) {
+
+30 
+shÜt_·th_Ën
+ = 
+	`¡¾’
+(
+shÜt_·th
+);
+
+31 
+dœ_Ën
+ = 
+	`¡¾’
+(
+£rv”_³rsi¡_dœ
+);
+
+32 
+fuÎ_Ën
+ = 
+dœ_Ën
+ + 
+shÜt_·th_Ën
+ + 1;
+
+34 *
+fuÎ_·th
+ = (*)
+	`m®loc
+(
+fuÎ_Ën
+);
+
+37 
+	`¡rýy
+(
+fuÎ_·th
+, 
+£rv”_³rsi¡_dœ
+);
+
+39 
+	`¡rÿt
+(
+fuÎ_·th
+, 
+shÜt_·th
+);
+
+40 
+	`DLOG
+("FuÎ…©h: %s\n", 
+fuÎ_·th
+);
+
+42  
+fuÎ_·th
+;
+
+43 
+	}
+}
+
+46 
+	$w©dfs_g‘©Œ
+(*
+¬gTy³s
+, **
+¬gs
+) {
+
+49 *
+shÜt_·th
+ = (*)
+¬gs
+[0];
+
+52 
+¡©
+ *
+¡©buf
+ = (¡© *)
+¬gs
+[1];
+
+54 *
+»t
+ = (*)
+¬gs
+[2];
+
+58 *
+fuÎ_·th
+ = 
+	`g‘_fuÎ_·th
+(
+shÜt_·th
+);
+
+61 *
+»t
+ = 0;
+
+65 ()
+¡©buf
+;
+
+68 
+sys_»t
+ = 0;
+
+70 ià(
+sys_»t
+ < 0) {
+
+73 *
+»t
+ = -
+”ºo
+;
+
+77 
+	`ä“
+(
+fuÎ_·th
+);
+
+82 
+	}
+}
+
+85 
+	$maš
+(
+¬gc
+, *
+¬gv
+[]) {
+
+88 ià(
+¬gc
+ != 2) {
+
+99 
+£rv”_³rsi¡_dœ
+ = 
+¬gv
+[1];
+
+107 
+»t
+ = 0;
+
+118 
+¬gTy³s
+[4];
+
+120 
+¬gTy³s
+[0] =
+
+121 (1u << 
+ARG_INPUT
+è| (1u << 
+ARG_ARRAY
+è| (
+ARG_CHAR
+ << 16u) | 1u;
+
+123 
+¬gTy³s
+[1] =
+
+124 (1u << 
+ARG_OUTPUT
+è| (1u << 
+ARG_ARRAY
+è| (
+ARG_CHAR
+ << 16u) | 1u;
+
+126 
+¬gTy³s
+[2] = (1u << 
+ARG_OUTPUT
+è| (
+ARG_INT
+ << 16u);
+
+128 
+¬gTy³s
+[3] = 0;
+
+131 
+»t
+ = 
+	`½cRegi¡”
+((*)"g‘©Œ", 
+¬gTy³s
+, 
+w©dfs_g‘©Œ
+);
+
+132 ià(
+»t
+ < 0) {
+
+134  
+»t
+;
+
+142  
+»t
+;
+
+143 
+	}
+}
+
+	@
+1
+.
+0
+7
+88
+debug.h
+rpc.h
+rw_lock.cpp
+rw_lock.h
+watdfs_client.cpp
+watdfs_client.h
+watdfs_server.cpp
