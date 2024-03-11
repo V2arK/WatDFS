@@ -15,8 +15,29 @@ INIT_LOG
 #include <cstdlib>
 #include <fuse.h>
 
-// P2
+// --------------------------- P2 ---------------------------
+
+#include <map>
 #include "rw_lock.h"
+
+enum class OpType {
+    READ,
+    WRITE
+};
+
+struct FileCritInfo{
+    OpType opType; // Enum to indicate read or write operation
+    rw_lock_t    *lock;          // Pointer to the lock
+
+    // Constructor to initialize the structure
+    FileCritInfo(OpType opType, rw_lock_t *lockPtr) :
+        opType(opType), lock(lockPtr) {
+    }
+};
+
+std::map<char *, struct FileCritInfo> global_lock_info;
+
+// ----------------------------------------------------------
 
 // Global state server_persist_dir.
 char *server_persist_dir = nullptr;

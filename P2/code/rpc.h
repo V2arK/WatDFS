@@ -43,6 +43,14 @@ extern "C" {
 #define UNEXPECTED_MSG -301
 #define FAILED_TO_SEND -302
 
+// --------------------------- P2 ---------------------------
+
+// sorry i think put this stuff here is a good idea :(
+#define LOCK 403
+#define UNLOCK 404
+
+// ----------------------------------------------------------
+
 // Useful typedef, of the type of functions that are registered.
 typedef int (*skeleton)(int *, void **);
 
