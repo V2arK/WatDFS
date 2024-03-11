@@ -10,9 +10,28 @@ INIT_LOG
 
 #include "rpc.h"
 
+// --------------------------- P2 ---------------------------
+#include <string>
+#include <map>
+
+struct Metadata {
+    int client_flag;
+    int server_flag;
+    time_t tc;
+};
+
+// global variables
+struct Userdata{
+    char                                  *cache_path;
+    time_t                                 cache_interval;
+    std::map<std::string, struct Metadata> files;
+};
+
+// ----------------------------------------------------------
+
 // SETUP AND TEARDOWN
-void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
-                      time_t cache_interval, int *ret_code) {
+void * watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
+                time_t cache_interval, int *ret_code) {
     // TODO: set up the RPC library by calling `rpcClientInit`.
     int rpc_init_status = rpcClientInit();
 
@@ -22,6 +41,7 @@ void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
 
     if (rpc_init_status != 0) {
         DLOG("Failed to initialize RPC Client");
+        *ret_code = -1;
         return nullptr;
     }
 
@@ -36,12 +56,24 @@ void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
     // TODO Initialize any global state that you require for the assignment and return it.
     // The value that you return here will be passed as userdata in other functions.
     // In A1, you might not need it, so you can return `nullptr`.
-    void *userdata = nullptr;
-
+    // void *userdata = nullptr;
+    struct Userdata *userdata = new struct Userdata;
     // TODO: save `path_to_cache` and `cache_interval` (for A3).
+    userdata->cache_interval = cache_interval;
+
+    userdata->cache_path     = (char *)malloc(strlen(path_to_cache) + 1);
+
+    if (userdata->cache_path == NULL) {
+        *ret_code = -1;
+        DLOG("Failed to initialize usetdata->cache_path");
+        return nullptr;
+    }
+
+    strcpy(userdata->cache_path, path_to_cache);
 
     // TODO: set `ret_code` to 0 if everything above succeeded else some appropriate
     // non-zero value.
+    *ret_code = 0;
 
     // Return pointer to global state data.
     return userdata;
@@ -54,6 +86,10 @@ void watdfs_cli_destroy(void *userdata) {
     // The client should call rpcClientDestroy when they are finished interacting with the server.
     // This will terminate connections with the server.
     rpcClientDestroy();
+
+    // free userdata
+    free(((struct Userdata *)userdata)->cache_path);
+    delete ((struct Userdata *)userdata);
 }
 
 // GET FILE ATTRIBUTES

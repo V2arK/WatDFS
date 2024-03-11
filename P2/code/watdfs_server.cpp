@@ -17,25 +17,29 @@ INIT_LOG
 
 // --------------------------- P2 ---------------------------
 
+#include <string>
 #include <map>
 #include "rw_lock.h"
 
+
 enum class OpType {
     READ,
-    WRITE
+    WRITE,
+    BOTH
 };
 
-struct FileCritInfo{
+struct FileInfo{
     OpType opType; // Enum to indicate read or write operation
     rw_lock_t    *lock;          // Pointer to the lock
 
     // Constructor to initialize the structure
-    FileCritInfo(OpType opType, rw_lock_t *lockPtr) :
+    FileInfo(OpType opType, rw_lock_t *lockPtr) :
         opType(opType), lock(lockPtr) {
     }
 };
 
-std::map<char *, struct FileCritInfo> global_lock_info;
+// full path : fileInfo
+std::map<std::string, struct FileInfo> global_lock_info;
 
 // ----------------------------------------------------------
 
@@ -500,6 +504,15 @@ int watdfs_lock(int *argTypes, void **args) {
 
     // Initially we set the return code to be 0.
     *ret = 0;
+
+    // get lock info
+    auto it = global_lock_info.find(std::string(full_path));
+
+    if (it != global_lock_info.end()) { // exists
+        void* it;
+    } else { // non exist
+        void *it;
+    }
 
     return 0; // SPACE HOLDER
 }
