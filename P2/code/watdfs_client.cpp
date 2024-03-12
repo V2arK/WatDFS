@@ -16,9 +16,8 @@ INIT_LOG
 
 struct Metadata {
     int    client_flag;
-    int    server_flag;
-    // tc for remote, local can be found from file metadata
-    time_t tc_remote;
+    int    fileDesc;
+    time_t tc;
 };
 
 // global variables
@@ -26,10 +25,154 @@ struct Userdata {
     char  *cache_path;
     time_t cache_interval;
     // short path -> metadata
-    std::map<std::string, struct Metadata> files;
+    std::map<std::string, struct Metadata> files_opened;
 };
 
 // helpers
+
+// 7.2.4
+
+// lock the file for transfering using the read or write lock_mode, respectively.
+int lock(const char *path, rw_lock_mode_t mode) {
+    // SET UP THE RPC CALL
+    DLOG("lock called for '%s'", path);
+
+    // getattr has 3 arguments.
+    int ARG_COUNT = 3;
+
+    // Allocate space for the output arguments.
+    void **args = new void *[ARG_COUNT];
+
+    // Allocate the space for arg types, and one extra space for the null
+    // array element.
+    int arg_types[ARG_COUNT + 1];
+
+    // The path has string length (strlen) + 1 (for the null character).
+    int pathlen = strlen(path) + 1;
+
+    // Fill in the arguments
+
+    // The first argument is the path, it is an input only argument, and a char
+    // array. The length of the array is the length of the path.
+    arg_types[0] =
+        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
+    // For arrays the argument is the array pointer, not a pointer to a pointer.
+    args[0] = (void *)path;
+
+    // Argument 2: mode (input, ARG_INT)
+    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+    args[1]      = (void *)&mode;
+
+    // Argument 3: return code (output, int)
+    int retcode  = 0;
+    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+    args[2]      = (void *)&retcode;
+
+    // Finally, the last position of the arg types is 0. There is no
+    // corresponding arg.
+    arg_types[3] = 0;
+
+    // MAKE THE RPC CALL
+    int rpc_ret = rpcCall((char *)"lock", arg_types, args);
+
+    // HANDLE THE RETURN
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    if (rpc_ret < 0) {
+        DLOG("lock rpc failed with error '%d'", rpc_ret);
+        // Something went wrong with the rpcCall, return a sensible return
+        // value. In this case lets return, -EINVAL
+        fxn_ret = -EINVAL;
+    } else {
+        // Our RPC call succeeded. However, it's possible that the return code
+        // from the server is not 0, that is it may be -errno. Therefore, we
+        // should set our function return value to the retcode from the server.
+
+        // TODO: set the function return value to the return code from the server.
+        fxn_ret = retcode; // Set function return value to the server's return cod
+    }
+
+    if (fxn_ret < 0) {
+        DLOG("lock failed with code: %d", fxn_ret);
+    }
+
+    // Clean up the memory we have allocated.
+    delete[] args;
+
+    // Finally return the value we got from the server.
+    return fxn_ret;
+}
+
+// unlock the file for transfering using the read or write lock_mode, respectively.
+int unlock(const char *path, rw_lock_mode_t mode) {
+    // SET UP THE RPC CALL
+    DLOG("unlock called for '%s'", path);
+
+    // getattr has 3 arguments.
+    int ARG_COUNT = 3;
+
+    // Allocate space for the output arguments.
+    void **args = new void *[ARG_COUNT];
+
+    // Allocate the space for arg types, and one extra space for the null
+    // array element.
+    int arg_types[ARG_COUNT + 1];
+
+    // The path has string length (strlen) + 1 (for the null character).
+    int pathlen = strlen(path) + 1;
+
+    // Fill in the arguments
+
+    // The first argument is the path, it is an input only argument, and a char
+    // array. The length of the array is the length of the path.
+    arg_types[0] =
+        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
+    // For arrays the argument is the array pointer, not a pointer to a pointer.
+    args[0] = (void *)path;
+
+    // Argument 2: mode (input, ARG_INT)
+    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+    args[1]      = (void *)&mode;
+
+    // Argument 3: return code (output, int)
+    int retcode  = 0;
+    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+    args[2]      = (void *)&retcode;
+
+    // Finally, the last position of the arg types is 0. There is no
+    // corresponding arg.
+    arg_types[3] = 0;
+
+    // MAKE THE RPC CALL
+    int rpc_ret = rpcCall((char *)"unlock", arg_types, args);
+
+    // HANDLE THE RETURN
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    if (rpc_ret < 0) {
+        DLOG("unlock rpc failed with error '%d'", rpc_ret);
+        // Something went wrong with the rpcCall, return a sensible return
+        // value. In this case lets return, -EINVAL
+        fxn_ret = -EINVAL;
+    } else {
+        // Our RPC call succeeded. However, it's possible that the return code
+        // from the server is not 0, that is it may be -errno. Therefore, we
+        // should set our function return value to the retcode from the server.
+
+        // TODO: set the function return value to the return code from the server.
+        fxn_ret = retcode; // Set function return value to the server's return cod
+    }
+
+    if (fxn_ret < 0) {
+        DLOG("unlock failed with code: %d", fxn_ret);
+    }
+
+    // Clean up the memory we have allocated.
+    delete[] args;
+
+    // Finally return the value we got from the server.
+    return fxn_ret;
+}
 
 // Copy from watdfs_server. Used to extend the path on to cache path.
 char *get_full_path(void *userdata, const char *short_path) {
@@ -51,20 +194,64 @@ char *get_full_path(void *userdata, const char *short_path) {
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
 struct Metadata *get_metadata(void *userdata, const char *path) {
-    auto it = ((Userdata *)userdata)->files.find(std::string(path));
+    auto it = ((Userdata *)userdata)->files_opened.find(std::string(path));
 
-    if (it != ((Userdata *)userdata)->files.end()) { // exists
+    if (it != ((Userdata *)userdata)->files_opened.end()) { // exists
         return &(it->second);
     } else { // non exist
         return NULL;
     }
 }
-
+// check if the file at given path is fresh.
+// ASSUME file is opened.
 bool is_fresh(void *userdata, char *path) {
-    // 
+
+    struct Metadata *metadata  = get_metadata(userdata, path);
+
+    time_t T  = time(NULL);
+    time_t Tc = metadata->tc;
+
+    if ((T - Tc) < ((Userdata *) userdata)->cache_interval) {
+        // case (i)
+        return true;
+    }
+
+    // --- get file attributes from the server ---
+    struct stat *statbuf_remote = new struct stat;
+    int          rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to getattr from server on %s", path);
+        // nothing we can do really
+    }
+
+    // --- get file attributes from the client ---
+    char        *full_path     = get_full_path(userdata, path);
+    struct stat *statbuf_local = new struct stat;
+    int fxn_ret                = stat(full_path, statbuf_local);
+
+    if (fxn_ret < 0) {
+        fxn_ret = -errno;
+        DLOG("Failed on getattr on %s with error code %d", full_path, errno);
+        // nothing we can do really
+    }
+
+    if (statbuf_local->st_mtime == statbuf_remote->st_mtime) {
+        // case (ii)
+        free(full_path);
+        free(statbuf_local);
+        free(statbuf_remote);
+        return true;
+    }
+
+    free(full_path);
+    free(statbuf_local);
+    free(statbuf_remote);
+
+    return false;
 }
 
-int download_file(void *userdata, char *path) {
+int download_file(void *userdata, const char *path) {
     DLOG("Start to download file %s", path);
 
     // The integer value that the actual function will return.
@@ -146,7 +333,7 @@ int download_file(void *userdata, char *path) {
 
     // read file into
     char *buf_content = new char[statbuf_remote->st_size];
-    rpc_ret           = watdfs_cli_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
+    rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
 
     if (rpc_ret < 0) {
         fxn_ret = -errno;
@@ -204,7 +391,7 @@ int download_file(void *userdata, char *path) {
     }
 
     // --- Release server file ---
-    rpc_ret = watdfs_cli_release(userdata, path, fi);
+    rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
         DLOG("Failed to release file %s from server with error code %d", path, errno);
@@ -231,7 +418,7 @@ int download_file(void *userdata, char *path) {
     return fxn_ret;
 }
 
-int upload_file(void *userdata, char *path) {
+int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
     // The integer value that the actual function will return.
@@ -290,7 +477,7 @@ int upload_file(void *userdata, char *path) {
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to write the file to server. Maybe WRONLY will work
     fi->flags = O_RDWR;
-    int rpc_ret   = watdfs_cli_open(userdata, path, fi);
+    int rpc_ret   = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
         // not sure whicih Error Code referring to file not exit, so we assume thats the case
@@ -340,7 +527,7 @@ int upload_file(void *userdata, char *path) {
 
     // --- write the file to the server ---
     // write the buf_content to remote server starting from 0, for st_size length
-    rpc_ret = watdfs_cli_write(userdata, path, buf_content, statbuf_local->st_size, 0, fi);
+    rpc_ret = rpc_write(userdata, path, buf_content, statbuf_local->st_size, 0, fi);
 
     if (rpc_ret < 0) {
         DLOG("Failed to write into file %s with error code %d", full_path, errno);
@@ -355,7 +542,7 @@ int upload_file(void *userdata, char *path) {
 
     // --- update the file metadata at the server to match client ---
     struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
-    rpc_ret               = watdfs_cli_utimensat(userdata, path, ts);
+    rpc_ret               = rpc_utimensat(userdata, path, ts);
 
     if (rpc_ret < 0) {
         DLOG("Failed to utimensat on server file %s with error code %d", path, errno);
@@ -369,7 +556,7 @@ int upload_file(void *userdata, char *path) {
     }
 
     // --- Release server file ---
-    rpc_ret = watdfs_cli_release(userdata, path, fi);
+    rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
         DLOG("Failed to release file %s from server with error code %d", path, errno);
@@ -396,7 +583,7 @@ int upload_file(void *userdata, char *path) {
     return fxn_ret;
 }
 
-// ----------------------------------------------------------
+// ---------------------- CLI functions ----------------------
 
 // SETUP AND TEARDOWN
 void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
@@ -462,6 +649,70 @@ void watdfs_cli_destroy(void *userdata) {
     free(((struct Userdata *)userdata)->cache_path);
     delete ((struct Userdata *)userdata);
 }
+
+// GET FILE ATTRIBUTES
+int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
+    // SET UP THE RPC CALL
+    DLOG("watdfs_cli_getattr called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    struct Metadata *metadata = get_metadata(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("watdfs_cli_getattr accessing new file '%s', sending RPC ...", path);
+
+        // we attempt to get the statbuf from the server.
+        struct stat *statbuf_remote = new struct stat;
+        // MAKE THE RPC CALL
+        int rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+
+        if (rpc_ret < 0) {
+            // some error encountered.
+            DLOG("watdfs_cli_getattr failed to obtain file '%s' info.", path);
+
+            // free memories
+            free(statbuf_remote);
+
+            // exit
+            return rpc_ret;
+        } 
+
+        // sucessfully get file attr from server
+        // try to open and transfer the file from the server.
+        rpc_ret = download_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
+            // probably not that severe to exit?
+            fxn_ret = rpc_ret;
+        }
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness 
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+
+        } else {
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents 
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+        }
+    }
+
+    // ------------------------
+}
+
+
+// -------------------- P1 RPC functions --------------------
 
 // the getattr RPC function
 int rpc_getattr(void *userdata, const char *path, struct stat *statbuf) {
@@ -549,50 +800,8 @@ int rpc_getattr(void *userdata, const char *path, struct stat *statbuf) {
     return fxn_ret;
 }
 
-// GET FILE ATTRIBUTES
-int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
-    // SET UP THE RPC CALL
-    DLOG("watdfs_cli_getattr called for '%s'", path);
-
-    // ---------- P2 ----------
-
-    // The integer value watdfs_cli_getattr will return.
-    int fxn_ret = 0;
-
-    // Get the local file name, so we call our helper function which appends
-    // the server_persist_dir to the given path.
-    char *full_path = get_full_path(userdata, path);
-
-    struct Metadata *metadata = get_metadata(userdata, path);
-
-    if (metadata == NULL) {
-        // file not opened
-        DLOG("watdfs_cli_getattr accessing new file '%s', sending RPC ...", path);
-
-        // we attempt to get the statbuf from the server.
-        struct stat *statbuf_remote = new struct stat;
-        // MAKE THE RPC CALL
-        int rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
-
-        if (rpc_ret < 0) {
-            // some error encountered.
-            DLOG("atdfs_cli_getattr failed to obtain file '%s' info.", path);
-
-            // free memories
-            free(statbuf_remote);
-
-            // exit
-            return rpc_ret;
-        } else {
-            // no issues
-        }
-    }
-
-    // ------------------------
-}
-
 // CREATE, OPEN AND CLOSE
-int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
+int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     // Called to create a file.
     DLOG("watdfs_cli_mknod called for '%s'", path);
 
@@ -665,7 +874,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     return fxn_ret;
 }
 
-int watdfs_cli_open(void *userdata, const char *path,
+int rpc_open(void *userdata, const char *path,
                     struct fuse_file_info *fi) {
     // Called during open.
     // You should fill in fi->fh.
@@ -744,7 +953,7 @@ int watdfs_cli_open(void *userdata, const char *path,
     return 0;
 }
 
-int watdfs_cli_release(void *userdata, const char *path,
+int rpc_release(void *userdata, const char *path,
                        struct fuse_file_info *fi) {
     // Called during close, but possibly asynchronously.
     DLOG("watdfs_cli_release called for '%s'", path);
@@ -817,7 +1026,7 @@ int watdfs_cli_release(void *userdata, const char *path,
 }
 
 // READ AND WRITE DATA
-int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
+int rpc_read(void *userdata, const char *path, char *buf, size_t size,
                     off_t offset, struct fuse_file_info *fi) {
     // Read size amount of data at offset of file into buf.
 
@@ -976,7 +1185,7 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
     return read;
 }
 
-int watdfs_cli_write(void *userdata, const char *path, const char *buf,
+int rpc_write(void *userdata, const char *path, const char *buf,
                      size_t size, off_t offset, struct fuse_file_info *fi) {
     // Write size amount of data at offset of file from buf.
 
@@ -1133,7 +1342,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
     return write;
 }
 
-int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
+int rpc_truncate(void *userdata, const char *path, off_t newsize) {
     // Change the file size to newsize.
 
     // This function changes the size of the file to newsize.
@@ -1213,7 +1422,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
     return 0;
 }
 
-int watdfs_cli_fsync(void *userdata, const char *path,
+int rpc_fsync(void *userdata, const char *path,
                      struct fuse_file_info *fi) {
     // Force a flush of file data.
     DLOG("watdfs_cli_fsync called for '%s'", path);
@@ -1286,7 +1495,7 @@ int watdfs_cli_fsync(void *userdata, const char *path,
 }
 
 // CHANGE METADATA
-int watdfs_cli_utimensat(void *userdata, const char *path,
+int rpc_utimensat(void *userdata, const char *path,
                          const struct timespec ts[2]) {
     // Change file access and modification times.
     DLOG("watdfs_cli_open called for '%s'", path);
@@ -1363,150 +1572,4 @@ int watdfs_cli_utimensat(void *userdata, const char *path,
     DLOG("utimensat succeed with file handler: %ld", (unsigned long)fxn_ret);
 
     return 0;
-}
-
-// --------------------------- P2 ---------------------------
-
-// 7.2.4
-
-// lock the file for transfering using the read or write lock_mode, respectively.
-int lock(const char *path, rw_lock_mode_t mode) {
-    // SET UP THE RPC CALL
-    DLOG("lock called for '%s'", path);
-
-    // getattr has 3 arguments.
-    int ARG_COUNT = 3;
-
-    // Allocate space for the output arguments.
-    void **args = new void *[ARG_COUNT];
-
-    // Allocate the space for arg types, and one extra space for the null
-    // array element.
-    int arg_types[ARG_COUNT + 1];
-
-    // The path has string length (strlen) + 1 (for the null character).
-    int pathlen = strlen(path) + 1;
-
-    // Fill in the arguments
-
-    // The first argument is the path, it is an input only argument, and a char
-    // array. The length of the array is the length of the path.
-    arg_types[0] =
-        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
-    // For arrays the argument is the array pointer, not a pointer to a pointer.
-    args[0] = (void *)path;
-
-    // Argument 2: mode (input, ARG_INT)
-    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
-    args[1]      = (void *)&mode;
-
-    // Argument 3: return code (output, int)
-    int retcode  = 0;
-    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
-    args[2]      = (void *)&retcode;
-
-    // Finally, the last position of the arg types is 0. There is no
-    // corresponding arg.
-    arg_types[3] = 0;
-
-    // MAKE THE RPC CALL
-    int rpc_ret = rpcCall((char *)"lock", arg_types, args);
-
-    // HANDLE THE RETURN
-    // The integer value watdfs_cli_getattr will return.
-    int fxn_ret = 0;
-    if (rpc_ret < 0) {
-        DLOG("lock rpc failed with error '%d'", rpc_ret);
-        // Something went wrong with the rpcCall, return a sensible return
-        // value. In this case lets return, -EINVAL
-        fxn_ret = -EINVAL;
-    } else {
-        // Our RPC call succeeded. However, it's possible that the return code
-        // from the server is not 0, that is it may be -errno. Therefore, we
-        // should set our function return value to the retcode from the server.
-
-        // TODO: set the function return value to the return code from the server.
-        fxn_ret = retcode; // Set function return value to the server's return cod
-    }
-
-    if (fxn_ret < 0) {
-        DLOG("lock failed with code: %d", fxn_ret);
-    }
-
-    // Clean up the memory we have allocated.
-    delete[] args;
-
-    // Finally return the value we got from the server.
-    return fxn_ret;
-}
-
-// unlock the file for transfering using the read or write lock_mode, respectively.
-int unlock(const char *path, rw_lock_mode_t mode) {
-    // SET UP THE RPC CALL
-    DLOG("unlock called for '%s'", path);
-
-    // getattr has 3 arguments.
-    int ARG_COUNT = 3;
-
-    // Allocate space for the output arguments.
-    void **args = new void *[ARG_COUNT];
-
-    // Allocate the space for arg types, and one extra space for the null
-    // array element.
-    int arg_types[ARG_COUNT + 1];
-
-    // The path has string length (strlen) + 1 (for the null character).
-    int pathlen = strlen(path) + 1;
-
-    // Fill in the arguments
-
-    // The first argument is the path, it is an input only argument, and a char
-    // array. The length of the array is the length of the path.
-    arg_types[0] =
-        (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | (uint)pathlen;
-    // For arrays the argument is the array pointer, not a pointer to a pointer.
-    args[0] = (void *)path;
-
-    // Argument 2: mode (input, ARG_INT)
-    arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
-    args[1]      = (void *)&mode;
-
-    // Argument 3: return code (output, int)
-    int retcode  = 0;
-    arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
-    args[2]      = (void *)&retcode;
-
-    // Finally, the last position of the arg types is 0. There is no
-    // corresponding arg.
-    arg_types[3] = 0;
-
-    // MAKE THE RPC CALL
-    int rpc_ret = rpcCall((char *)"unlock", arg_types, args);
-
-    // HANDLE THE RETURN
-    // The integer value watdfs_cli_getattr will return.
-    int fxn_ret = 0;
-    if (rpc_ret < 0) {
-        DLOG("unlock rpc failed with error '%d'", rpc_ret);
-        // Something went wrong with the rpcCall, return a sensible return
-        // value. In this case lets return, -EINVAL
-        fxn_ret = -EINVAL;
-    } else {
-        // Our RPC call succeeded. However, it's possible that the return code
-        // from the server is not 0, that is it may be -errno. Therefore, we
-        // should set our function return value to the retcode from the server.
-
-        // TODO: set the function return value to the return code from the server.
-        fxn_ret = retcode; // Set function return value to the server's return cod
-    }
-
-    if (fxn_ret < 0) {
-        DLOG("unlock failed with code: %d", fxn_ret);
-    }
-
-    // Clean up the memory we have allocated.
-    delete[] args;
-
-    // Finally return the value we got from the server.
-    return fxn_ret;
 }
