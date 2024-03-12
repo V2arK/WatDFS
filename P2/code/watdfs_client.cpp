@@ -15,23 +15,186 @@ INIT_LOG
 #include <map>
 
 struct Metadata {
-    int client_flag;
-    int server_flag;
+    int    client_flag;
+    int    server_flag;
     time_t tc;
 };
 
 // global variables
-struct Userdata{
-    char                                  *cache_path;
-    time_t                                 cache_interval;
+struct Userdata {
+    char  *cache_path;
+    time_t cache_interval;
+    // short path -> metadata
     std::map<std::string, struct Metadata> files;
 };
+
+// helpers
+
+// Copy from watdfs_server. Used to extend the path on to cache path.
+char *get_full_path(void *userdata, const char *short_path) {
+    int short_path_len = strlen(short_path);
+    int dir_len        = strlen(((Userdata *)userdata)->cache_path);
+    int full_len       = dir_len + short_path_len + 1;
+
+    char *full_path = (char *)malloc(full_len);
+
+    // First fill in the directory.
+    strcpy(full_path, ((Userdata *)userdata)->cache_path);
+    // Then append the path.
+    strcat(full_path, short_path);
+    DLOG("Full path: %s\n", full_path);
+
+    return full_path;
+}
+
+// return NULL if file not exist in userdata (not opened)
+// otherwize return the Metadata.
+struct Metadata *get_metadata(void *userdata, const char *path) {
+    auto it = ((Userdata *)userdata)->files.find(std::string(path));
+
+    if (it != ((Userdata *)userdata)->files.end()) { // exists
+        return &(it->second);
+    } else { // non exist
+        return NULL;
+    }
+}
+
+int download_file(void *userdata, char *path) {
+    DLOG("Start to download file %s", path);
+
+    // The integer value that the actual function will return.
+    int fxn_ret = 0;
+
+    // Firstly, we attempt to get the statbuf from the server.
+
+    // --- get file attributes from the server ---
+    struct stat *statbuf_remote = new struct stat;
+    int          rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+    // Open for reading and writing.
+    // the file descriptor shall not share it with any other process in the system.
+    int fileDesc_local = open(full_path, O_RDWR);
+
+    // Upon successful completion, the function shall open the file and
+    // return a non-negative integer representing the lowest numbered unused file descriptor.
+    // Otherwise, -1 shall be returned and errno set to indicate the error.
+    // No files shall be created or modified if the function returns -1.
+    if (fileDesc_local == -1) {
+        // failed to open file.
+        // There could be many cases why, here is a list:
+        // https://pubs.opengroup.org/onlinepubs/007904875/functions/open.html
+        // Don't know how to handle the issues other than the file DNE.
+        // TODO: Maybe need to add other check?
+
+        // assume file DNE, we create the local file that has
+        // the same MODE and DEVice identifier.
+        fxn_ret = mknod(full_path, statbuf_remote->st_mode, statbuf_remote->st_dev);
+
+        if (fxn_ret < 0) {
+            DLOG("Failed to create file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            free(statbuf_remote);
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // now we created the file, try again.
+        fileDesc_local = open(full_path, O_RDWR);
+
+        if (fileDesc_local == -1) {
+            DLOG("Failed to open existing file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            free(statbuf_remote);
+            free(full_path);
+            return fxn_ret;
+        }
+    }
+
+    // --- Read file from server ---
+    // firstly open file from server, we know it exists since we getattr.
+    struct fuse_file_info *fi = new struct fuse_file_info;
+    // we just want to read the file and download to client.
+    fi->flags = O_RDONLY;
+    rpc_ret   = watdfs_cli_open(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(full_path);
+        DLOG("RPC failed on watdfs_cli_open while downloading file on file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // TODO: Add lock here, make sure file read is atomic.
+
+    // read file into
+    char *buf_content = new char[statbuf_remote->st_size];
+    rpc_ret           = watdfs_cli_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        free(full_path);
+        DLOG("RPC failed on watdfs_cli_read while reading content on file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // --- truncate the file at the client to make sure its empty ---
+    fxn_ret = truncate(full_path, 0);
+
+    if (fxn_ret < 0) {
+        DLOG("Failed to truncate file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        free(full_path);
+        return fxn_ret;
+    }
+
+    // --- write the file to the client ---
+    // write the buf_content to fileDesc_local starting -, for st_size length
+    fxn_ret = pwrite(fileDesc_local, buf_content, statbuf_remote->st_size, 0);
+
+    if (fxn_ret < 0) {
+        DLOG("Failed to write into file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        free(full_path);
+        return fxn_ret;
+    }
+
+    // --- update the file metadata at the client to match server ---
+    struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
+    fxn_ret               = futimens(fileDesc_local, ts);
+
+    // --- Release server file ---
+    rpc_ret = watdfs_cli_release(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to release file %s from server with error code %d", path, errno);
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        free(full_path);
+        return fxn_ret;
+    }
+}
 
 // ----------------------------------------------------------
 
 // SETUP AND TEARDOWN
-void * watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
-                time_t cache_interval, int *ret_code) {
+void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
+                      time_t cache_interval, int *ret_code) {
     // TODO: set up the RPC library by calling `rpcClientInit`.
     int rpc_init_status = rpcClientInit();
 
@@ -61,11 +224,13 @@ void * watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
     // TODO: save `path_to_cache` and `cache_interval` (for A3).
     userdata->cache_interval = cache_interval;
 
-    userdata->cache_path     = (char *)malloc(strlen(path_to_cache) + 1);
+    userdata->cache_path = (char *)malloc(strlen(path_to_cache) + 1);
 
     if (userdata->cache_path == NULL) {
         *ret_code = -1;
         DLOG("Failed to initialize usetdata->cache_path");
+
+        free(userdata);
         return nullptr;
     }
 
@@ -92,10 +257,10 @@ void watdfs_cli_destroy(void *userdata) {
     delete ((struct Userdata *)userdata);
 }
 
-// GET FILE ATTRIBUTES
-int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
+// the getattr RPC function
+int rpc_getattr(void *userdata, const char *path, struct stat *statbuf) {
     // SET UP THE RPC CALL
-    DLOG("watdfs_cli_getattr called for '%s'", path);
+    DLOG("rpc_getattr called for '%s'", path);
 
     // getattr has 3 arguments.
     int ARG_COUNT = 3;
@@ -176,6 +341,48 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
     // Finally return the value we got from the server.
     return fxn_ret;
+}
+
+// GET FILE ATTRIBUTES
+int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
+    // SET UP THE RPC CALL
+    DLOG("watdfs_cli_getattr called for '%s'", path);
+
+    // ---------- P2 ----------
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    struct Metadata *metadata = get_metadata(userdata, path);
+
+    if (metadata == NULL) {
+        // file not opened
+        DLOG("watdfs_cli_getattr accessing new file '%s', sending RPC ...", path);
+
+        // we attempt to get the statbuf from the server.
+        struct stat *statbuf_remote = new struct stat;
+        // MAKE THE RPC CALL
+        int rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+
+        if (rpc_ret < 0) {
+            // some error encountered.
+            DLOG("atdfs_cli_getattr failed to obtain file '%s' info.", path);
+
+            // free memories
+            free(statbuf_remote);
+
+            // exit
+            return rpc_ret;
+        } else {
+            // no issues
+        }
+    }
+
+    // ------------------------
 }
 
 // CREATE, OPEN AND CLOSE
@@ -905,9 +1112,9 @@ int watdfs_cli_utimensat(void *userdata, const char *path,
     //  this is done on the server side
 
     // Assuming the entire structure is passed as a char array.
-    arg_types[1] = ((1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u)) | ((uint)sizeof(struct timespec) * 2); 
+    arg_types[1] = ((1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u)) | ((uint)sizeof(struct timespec) * 2);
     // we have ts[2]
-    args[1]      = (void *)ts;
+    args[1] = (void *)ts;
 
     // Argument 3: return code (output, int)
     int retcode  = 0;
