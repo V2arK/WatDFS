@@ -795,6 +795,27 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
     if (metadata == NULL) {
         // --- File not opened ---
+        rpc_ret = mknod(full_path, mode, dev);
+
+        if (rpc_ret < 0) {
+            DLOG("watdfs_cli_mknod: Failed to mknod %s with error code %d", path, errno);
+            fxn_ret = -errno;
+
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // otherwize lets update the file to server.
+        rpc_ret = upload_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            // maybe file exists
+            DLOG("watdfs_cli_mknod: Failed to upload %s to server with error code %d", path, errno);
+            fxn_ret = -rpc_ret;
+
+            free(full_path);
+            return fxn_ret;
+        }
 
     } else {
         // --- File opened ---
@@ -802,16 +823,29 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             // Only read calls are allowed and should
             // perform freshness checks before reads, as usual.
             // Write calls should fail and return -EMFILE.
-
+            DLOG("watdfs_cli_mknod: cannot mknod readonly file %s", path);
+            fxn_ret = -errno;
+            free(full_path);
+            return fxn_ret;
         } else { // WRITE mode
             // Read calls should not perform freshness checks, as there
             // would be no updates on the server due to write exclusion and this prevents
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
 
-            void *userdata; // space holder
+            // if it's opened, we just upload to server?
+            rpc_ret = upload_file(userdata, path);
+
+            if (rpc_ret < 0) {
+                DLOG("watdfs_cli_mknod: failed to upload file %s, with errno %d", path, errno);
+                fxn_ret = rpc_ret;
+                free(full_path);
+                return fxn_ret;
+            }
         }
     }
+    
+    return fxn_ret;
 }
 
 int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi) {
