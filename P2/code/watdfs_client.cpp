@@ -17,7 +17,8 @@ INIT_LOG
 struct Metadata {
     int    client_flag;
     int    server_flag;
-    time_t tc;
+    // tc for remote, local can be found from file metadata
+    time_t tc_remote;
 };
 
 // global variables
@@ -59,6 +60,10 @@ struct Metadata *get_metadata(void *userdata, const char *path) {
     }
 }
 
+bool is_fresh(void *userdata, char *path) {
+    // 
+}
+
 int download_file(void *userdata, char *path) {
     DLOG("Start to download file %s", path);
 
@@ -70,6 +75,13 @@ int download_file(void *userdata, char *path) {
     // --- get file attributes from the server ---
     struct stat *statbuf_remote = new struct stat;
     int          rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        free(statbuf_remote);
+        DLOG("RPC failed on rpc_getattr file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
 
     // Get the local file name, so we call our helper function which appends
     // the server_persist_dir to the given path.
@@ -113,6 +125,8 @@ int download_file(void *userdata, char *path) {
         }
     }
 
+    // TODO: Add lock here, make sure file read is atomic.
+
     // --- Read file from server ---
     // firstly open file from server, we know it exists since we getattr.
     struct fuse_file_info *fi = new struct fuse_file_info;
@@ -126,10 +140,9 @@ int download_file(void *userdata, char *path) {
         free(statbuf_remote);
         free(full_path);
         DLOG("RPC failed on watdfs_cli_open while downloading file on file %s with error code %d", path, errno);
+        close(fileDesc_local);
         return fxn_ret;
     }
-
-    // TODO: Add lock here, make sure file read is atomic.
 
     // read file into
     char *buf_content = new char[statbuf_remote->st_size];
@@ -142,6 +155,7 @@ int download_file(void *userdata, char *path) {
         free(buf_content);
         free(full_path);
         DLOG("RPC failed on watdfs_cli_read while reading content on file %s with error code %d", path, errno);
+        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -155,6 +169,7 @@ int download_file(void *userdata, char *path) {
         free(statbuf_remote);
         free(buf_content);
         free(full_path);
+        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -169,12 +184,24 @@ int download_file(void *userdata, char *path) {
         free(statbuf_remote);
         free(buf_content);
         free(full_path);
+        close(fileDesc_local);
         return fxn_ret;
     }
 
     // --- update the file metadata at the client to match server ---
     struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
     fxn_ret               = futimens(fileDesc_local, ts);
+
+    if (fxn_ret < 0) {
+        DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(statbuf_remote);
+        free(buf_content);
+        free(full_path);
+        free(fi);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
 
     // --- Release server file ---
     rpc_ret = watdfs_cli_release(userdata, path, fi);
@@ -186,8 +213,187 @@ int download_file(void *userdata, char *path) {
         free(statbuf_remote);
         free(buf_content);
         free(full_path);
+        close(fileDesc_local);
         return fxn_ret;
     }
+
+    // TODO: Unlock
+
+    free(fi);
+    free(statbuf_remote);
+    free(buf_content);
+    free(full_path);
+
+    close(fileDesc_local);
+
+    DLOG("download_file on %s exit successfully", path);
+
+    return fxn_ret;
+}
+
+int upload_file(void *userdata, char *path) {
+    DLOG("Start to upload file %s", path);
+
+    // The integer value that the actual function will return.
+    int fxn_ret = 0;
+    // --- get file attributes from the client ---
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char        *full_path     = get_full_path(userdata, path);
+    struct stat *statbuf_local = new struct stat;
+    fxn_ret                    = stat(full_path, statbuf_local);
+
+    if (fxn_ret < 0) {
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(full_path);
+        DLOG("RPC failed on getting stat on file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // --- Open local file for reading and writing ---
+    // the file descriptor shall not share it with any other process in the system.
+    int fileDesc_local = open(full_path, O_RDONLY);
+
+    // Upon successful completion, the function shall open the file and
+    // return a non-negative integer representing the lowest numbered unused file descriptor.
+    // Otherwise, -1 shall be returned and errno set to indicate the error.
+    // No files shall be created or modified if the function returns -1.
+    if (fileDesc_local == -1) {
+        // failed to open file.
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(full_path);
+        DLOG("RPC failed on open local file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // --- Read local file ---
+    char *buf_content = new char[statbuf_local->st_size];
+    fxn_ret           = pread(fileDesc_local, buf_content, statbuf_local->st_size, 0);
+
+    if (fxn_ret < 0) {
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        DLOG("RPC failed on reading local content on file %s with error code %d", path, errno);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // TODO: Lock
+
+    // --- open file on server ---
+    // firstly open file from server, we know it exists since we created it otherwize.
+    struct fuse_file_info *fi = new struct fuse_file_info;
+    // we just want to write the file to server. Maybe WRONLY will work
+    fi->flags = O_RDWR;
+    int rpc_ret   = watdfs_cli_open(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        // not sure whicih Error Code referring to file not exit, so we assume thats the case
+        DLOG("Assuming file %s not exisint with error code %d", path, errno);
+        // create file on server
+        rpc_ret = watdfs_cli_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
+
+        if (rpc_ret < 0) {
+            fxn_ret = -errno;
+            free(statbuf_local);
+            free(buf_content);
+            free(full_path);
+            free(fi);
+            DLOG("RPC failed on creating new file %s on server with error code %d", path, errno);
+            close(fileDesc_local);
+            return fxn_ret;
+        }
+
+        // open file from server again, we know it exists since we created it.
+        rpc_ret   = watdfs_cli_open(userdata, path, fi);
+
+        if (rpc_ret < 0) {
+            fxn_ret = -errno;
+            free(statbuf_local);
+            free(buf_content);
+            free(full_path);
+            free(fi);
+            DLOG("RPC failed on opening new file %s on server with error code %d", path, errno);
+            close(fileDesc_local);
+            return fxn_ret;
+        }
+    }
+
+    // --- truncate the file at the server to make sure its empty ---
+    rpc_ret = watdfs_cli_truncate(userdata, path, 0);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to truncate server file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        free(fi);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // --- write the file to the server ---
+    // write the buf_content to remote server starting from 0, for st_size length
+    rpc_ret = watdfs_cli_write(userdata, path, buf_content, statbuf_local->st_size, 0, fi);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to write into file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        free(fi);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // --- update the file metadata at the server to match client ---
+    struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
+    rpc_ret               = watdfs_cli_utimensat(userdata, path, ts);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to utimensat on server file %s with error code %d", path, errno);
+        fxn_ret = -errno;
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        free(fi);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // --- Release server file ---
+    rpc_ret = watdfs_cli_release(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to release file %s from server with error code %d", path, errno);
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // TODO: Unlock
+
+    free(fi);
+    free(statbuf_local);
+    free(buf_content);
+    free(full_path);
+
+    close(fileDesc_local);
+
+    DLOG("upload_file on %s exit successfully", path);
+
+    return fxn_ret;
 }
 
 // ----------------------------------------------------------
