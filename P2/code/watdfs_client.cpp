@@ -205,13 +205,12 @@ struct Metadata *get_metadata(void *userdata, const char *path) {
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
-
-    struct Metadata *metadata  = get_metadata(userdata, path);
+    struct Metadata *metadata = get_metadata(userdata, path);
 
     time_t T  = time(NULL);
     time_t Tc = metadata->tc;
 
-    if ((T - Tc) < ((Userdata *) userdata)->cache_interval) {
+    if ((T - Tc) < ((Userdata *)userdata)->cache_interval) {
         // case (i)
         return true;
     }
@@ -228,7 +227,7 @@ bool is_fresh(void *userdata, const char *path) {
     // --- get file attributes from the client ---
     char        *full_path     = get_full_path(userdata, path);
     struct stat *statbuf_local = new struct stat;
-    int fxn_ret                = stat(full_path, statbuf_local);
+    int          fxn_ret       = stat(full_path, statbuf_local);
 
     if (fxn_ret < 0) {
         fxn_ret = -errno;
@@ -252,7 +251,7 @@ bool is_fresh(void *userdata, const char *path) {
 }
 
 // update the file given by 'path''s Tc to current time.
-void update_Tc(void *userdata, const char *path){
+void update_Tc(void *userdata, const char *path) {
     struct Metadata *metadata = get_metadata(userdata, path);
     // update the Tc to current time.
     if (metadata != NULL) {
@@ -485,8 +484,8 @@ int upload_file(void *userdata, const char *path) {
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to write the file to server. Maybe WRONLY will work
-    fi->flags = O_RDWR;
-    int rpc_ret   = rpc_open(userdata, path, fi);
+    fi->flags   = O_RDWR;
+    int rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
         // not sure whicih Error Code referring to file not exit, so we assume thats the case
@@ -506,7 +505,7 @@ int upload_file(void *userdata, const char *path) {
         }
 
         // open file from server again, we know it exists since we created it.
-        rpc_ret   = watdfs_cli_open(userdata, path, fi);
+        rpc_ret = watdfs_cli_open(userdata, path, fi);
 
         if (rpc_ret < 0) {
             fxn_ret = -errno;
@@ -691,7 +690,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
             free(full_path);
             // exit
             return rpc_ret;
-        }  
+        }
 
         // sucessfully get file attr from server
         // try to open and transfer the file from the server.
@@ -719,8 +718,8 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
         }
 
         // fill statbuf
-        rpc_ret            = stat(full_path, statbuf);
-        rpc_ret            = close(fileDesc_local);
+        rpc_ret = stat(full_path, statbuf);
+        rpc_ret = close(fileDesc_local);
 
         // done stuff, return.
         free(statbuf_remote);
@@ -737,7 +736,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     } else {
         // --- File opened ---
         if (metadata->client_flag == O_RDONLY) {
-            // Only read calls are allowed and should perform freshness 
+            // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             if (!is_fresh(userdata, path)) {
                 fxn_ret = download_file(userdata, path);
@@ -755,10 +754,10 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
         } else {
             // Read calls should not perform freshness checks, as there
-            // would be no updates on the server due to write exclusion and this prevents 
+            // would be no updates on the server due to write exclusion and this prevents
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
-            
+
             void *userdata; // space holder
         }
 
@@ -779,6 +778,77 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     // ------------------------
 }
 
+// CREATE, OPEN AND CLOSE
+int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
+    // Called to create a file.
+    DLOG("watdfs_cli_mknod called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    struct Metadata *metadata = get_metadata(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should
+            // perform freshness checks before reads, as usual.
+            // Write calls should fail and return -EMFILE.
+
+        } else { // WRITE mode
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            void *userdata; // space holder
+        }
+    }
+}
+
+int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi) {
+    // Called during open.
+    // You should fill in fi->fh.
+    DLOG("watdfs_cli_open called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    struct Metadata *metadata = get_metadata(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should
+            // perform freshness checks before reads, as usual.
+            // Write calls should fail and return -EMFILE.
+
+        } else { // WRITE mode
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            void *userdata; // space holder
+        }
+    }
+}
 
 // -------------------- P1 RPC functions --------------------
 
@@ -871,7 +941,7 @@ int rpc_getattr(void *userdata, const char *path, struct stat *statbuf) {
 // CREATE, OPEN AND CLOSE
 int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     // Called to create a file.
-    DLOG("watdfs_cli_mknod called for '%s'", path);
+    DLOG("rpc_mknod called for '%s'", path);
 
     // mknod has 4 arguments.
     int ARG_COUNT = 4;
@@ -943,10 +1013,10 @@ int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 }
 
 int rpc_open(void *userdata, const char *path,
-                    struct fuse_file_info *fi) {
+             struct fuse_file_info *fi) {
     // Called during open.
     // You should fill in fi->fh.
-    DLOG("watdfs_cli_open called for '%s'", path);
+    DLOG("rpc_open called for '%s'", path);
 
     // open has 3 arguments.
     int ARG_COUNT = 3;
@@ -1022,9 +1092,9 @@ int rpc_open(void *userdata, const char *path,
 }
 
 int rpc_release(void *userdata, const char *path,
-                       struct fuse_file_info *fi) {
+                struct fuse_file_info *fi) {
     // Called during close, but possibly asynchronously.
-    DLOG("watdfs_cli_release called for '%s'", path);
+    DLOG("rpc_release called for '%s'", path);
 
     // release has 3 arguments.
     int ARG_COUNT = 3;
@@ -1095,7 +1165,7 @@ int rpc_release(void *userdata, const char *path,
 
 // READ AND WRITE DATA
 int rpc_read(void *userdata, const char *path, char *buf, size_t size,
-                    off_t offset, struct fuse_file_info *fi) {
+             off_t offset, struct fuse_file_info *fi) {
     // Read size amount of data at offset of file into buf.
 
     // This function reads into buf at most size bytes from the specified offset of the file.
@@ -1105,7 +1175,7 @@ int rpc_read(void *userdata, const char *path, char *buf, size_t size,
     // Remember that size may be greater than the maximum array size of the RPC
     // library.
 
-    DLOG("watdfs_cli_read called for '%s'", path);
+    DLOG("rpc_read called for '%s'", path);
 
     // we might need to split read request to multiple RPC call.
     size_t max_size     = (unsigned long)MAX_ARRAY_LEN;
@@ -1254,7 +1324,7 @@ int rpc_read(void *userdata, const char *path, char *buf, size_t size,
 }
 
 int rpc_write(void *userdata, const char *path, const char *buf,
-                     size_t size, off_t offset, struct fuse_file_info *fi) {
+              size_t size, off_t offset, struct fuse_file_info *fi) {
     // Write size amount of data at offset of file from buf.
 
     // This function writes size number of bytes from buf into the file at the specified offset.
@@ -1262,7 +1332,7 @@ int rpc_write(void *userdata, const char *path, const char *buf,
 
     // Remember that size may be greater than the maximum array size of the RPC
     // library.
-    DLOG("watdfs_cli_write called for '%s'", path);
+    DLOG("rpc_write called for '%s'", path);
 
     // we might need to split write request to multiple RPC call.
     size_t max_size     = (unsigned long)MAX_ARRAY_LEN;
@@ -1418,7 +1488,7 @@ int rpc_truncate(void *userdata, const char *path, off_t newsize) {
     // If the file previously was shorter, it is extended,
     // and the extended part is filled in with null bytes (‘\0’).
 
-    DLOG("watdfs_cli_truncate called for '%s'", path);
+    DLOG("rpc_truncate called for '%s'", path);
 
     // open has 3 arguments.
     int ARG_COUNT = 3;
@@ -1491,9 +1561,9 @@ int rpc_truncate(void *userdata, const char *path, off_t newsize) {
 }
 
 int rpc_fsync(void *userdata, const char *path,
-                     struct fuse_file_info *fi) {
+              struct fuse_file_info *fi) {
     // Force a flush of file data.
-    DLOG("watdfs_cli_fsync called for '%s'", path);
+    DLOG("rpc_fsync called for '%s'", path);
 
     // release has 3 arguments.
     int ARG_COUNT = 3;
@@ -1564,9 +1634,9 @@ int rpc_fsync(void *userdata, const char *path,
 
 // CHANGE METADATA
 int rpc_utimensat(void *userdata, const char *path,
-                         const struct timespec ts[2]) {
+                  const struct timespec ts[2]) {
     // Change file access and modification times.
-    DLOG("watdfs_cli_open called for '%s'", path);
+    DLOG("rpc_open called for '%s'", path);
 
     // open has 3 arguments.
     int ARG_COUNT = 3;
