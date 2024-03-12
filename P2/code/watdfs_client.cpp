@@ -17,7 +17,7 @@ INIT_LOG
 struct Metadata {
     int    client_flag;
     int    fileDesc;
-    time_t tc;
+    time_t Tc; // time the cache entry was last validated by the client
 };
 
 // global variables
@@ -204,7 +204,7 @@ struct Metadata *get_metadata(void *userdata, const char *path) {
 }
 // check if the file at given path is fresh.
 // ASSUME file is opened.
-bool is_fresh(void *userdata, char *path) {
+bool is_fresh(void *userdata, const char *path) {
 
     struct Metadata *metadata  = get_metadata(userdata, path);
 
@@ -249,6 +249,15 @@ bool is_fresh(void *userdata, char *path) {
     free(statbuf_remote);
 
     return false;
+}
+
+// update the file given by 'path''s Tc to current time.
+void update_Tc(void *userdata, const char *path){
+    struct Metadata *metadata = get_metadata(userdata, path);
+    // update the Tc to current time.
+    if (metadata != NULL) {
+        metadata->Tc = time(NULL);
+    }
 }
 
 int download_file(void *userdata, const char *path) {
@@ -676,36 +685,95 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
         if (rpc_ret < 0) {
             // some error encountered.
-            DLOG("watdfs_cli_getattr failed to obtain file '%s' info.", path);
-
+            DLOG("watdfs_cli_getattr failed to obtain file '%s' info, maybe it DNE.", path);
             // free memories
             free(statbuf_remote);
-
+            free(full_path);
             // exit
             return rpc_ret;
-        } 
+        }  
 
         // sucessfully get file attr from server
         // try to open and transfer the file from the server.
         rpc_ret = download_file(userdata, path);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
-            // probably not that severe to exit?
-            fxn_ret = rpc_ret;
+            // some error encountered.
+            DLOG("watdfs_cli_getattr failed to download file '%s' info.", path);
+            // free memories
+            free(statbuf_remote);
+            free(full_path);
+            // exit
+            return rpc_ret;
         }
+
+        // the file descriptor shall not share it with any other process in the system.
+        int fileDesc_local = open(full_path, O_RDONLY);
+
+        if (fileDesc_local == -1) {
+            DLOG("Failed to open existing file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            free(statbuf_remote);
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // fill statbuf
+        rpc_ret            = stat(full_path, statbuf);
+        rpc_ret            = close(fileDesc_local);
+
+        // done stuff, return.
+        free(statbuf_remote);
+        free(full_path);
+
+        if (rpc_ret < 0) {
+            DLOG("Failed to read buf / close file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            return fxn_ret;
+        }
+
+        return rpc_ret;
+
     } else {
         // --- File opened ---
         if (metadata->client_flag == O_RDONLY) {
             // Only read calls are allowed and should perform freshness 
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            if (!is_fresh(userdata, path)) {
+                fxn_ret = download_file(userdata, path);
+
+                if (fxn_ret < 0) {
+                    DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
+                    // probably not that severe to exit?
+                } else {
+                    // we validated the cache entry as we just downloaded it
+                    update_Tc(userdata, path);
+                }
+            }
+
+            // file is fresh now (also possible if failed to download, don't know how to handle)
 
         } else {
             // Read calls should not perform freshness checks, as there
             // would be no updates on the server due to write exclusion and this prevents 
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
+            
+            void *userdata; // space holder
         }
+
+        // fill statbuf
+        rpc_ret = stat(full_path, statbuf);
+
+        free(full_path);
+
+        if (rpc_ret < 0) {
+            DLOG("Failed to read stat from %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            return fxn_ret;
+        }
+
+        return rpc_ret;
     }
 
     // ------------------------
