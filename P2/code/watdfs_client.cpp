@@ -16,7 +16,8 @@ INIT_LOG
 
 struct Metadata {
     int    client_flag;
-    int    fileDesc;
+    int    fileDesc_client;
+    int    fileHandle_server;
     time_t Tc; // time the cache entry was last validated by the client
 };
 
@@ -327,7 +328,7 @@ int download_file(void *userdata, const char *path) {
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to read the file and download to client.
     fi->flags = O_RDONLY;
-    rpc_ret   = watdfs_cli_open(userdata, path, fi);
+    rpc_ret   = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
         fxn_ret = -errno;
@@ -675,6 +676,13 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
     if (metadata == NULL) {
         // --- File not opened ---
+
+        // You should try to open and transfer the file from the server, 
+        // perform the operation locally, transfer the file back to the server 
+        // (for write calls), and close the file.
+
+        // so we don't check if local cache exists?
+
         DLOG("watdfs_cli_getattr accessing new file '%s', sending RPC ...", path);
 
         // we attempt to get the statbuf from the server.
@@ -776,6 +784,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     }
 
     // ------------------------
+    // will never reach here..
 }
 
 // CREATE, OPEN AND CLOSE
@@ -848,11 +857,167 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
         free(full_path);
         return fxn_ret;
     }
-    
+
+    free(full_path);
+    // return final results, should be 0
     return fxn_ret;
 }
 
 int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi) {
+    // Called during open.
+    // You should fill in fi->fh.
+    DLOG("watdfs_cli_open called for '%s'", path);
+
+    // When a file is opened, it is opened with a file access mode (i.e. O_RDONLY, O_WRONLY, O_RDWR).
+    // However, since files opened on the server will be read and files opened on the client will be
+    // written to while creating local cached copies, these modes cannot be passed directly to
+    // open on the client or server.
+
+    // When watdfs_cli_open is called, you should (try to) copy the file from the server to the client
+    // so the client can apply operations locally. Therefore, open should be called at both the client
+    // and the server as part of caching the file locally, resulting in two different file descriptors
+    // which you should track at the client. As part of these open calls,
+    // you should satisfy the mutual exclusion requirements (suggestions in Section 7.2.3).
+
+    // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
+    // such that the file handle returned from this call respects the flag properties (e.g., read-only, write-only).
+
+    // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
+    // for the file ( Tc). You can use the file modification time of the file to track T_client and T_server.
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    struct Metadata *metadata = get_metadata(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+
+        // the server should keep track of open files. The server should maintain a 
+        // thread synchronized data structure that maps filenames to their status 
+        // (open for write, open for read, etc.). 
+        // If the server receives an open request for write to a file that has already 
+        // been opened in write mode,the server will use this data structure to discover 
+        // the conflict a nd return - EACCES. 
+        // When the server receives a message to close a file it has opened in write mode, 
+        // the data structure should be modified to indicate that the file is now available to a writer.
+
+        // get file stat from server
+        struct stat *statbuf_remote = new struct stat;
+        rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
+
+        if (rpc_ret < 0) {
+            if (rpc_ret != -ENOENT) { 
+                /* Not sure whats happened */
+                DLOG("watdfs_cli_open: Failed to open file %s, with errno %d", path, rpc_ret);
+                fxn_ret = -rpc_ret;
+                free(full_path);
+                return fxn_ret;
+            }
+            /* No such file or directory */
+            // only use the following flags:
+            // O_CREAT, O_APPEND, O_EXCL, O_RDONLY, O_WRONLY, and O_RDWR.
+
+            if (fi->flags != O_CREAT) {
+                // we are not creating, and file not exist.
+                DLOG("watdfs_cli_open: Failed to open file %s, file not exist", path);
+                free(full_path);
+                return -ENOENT;
+            }
+
+            DLOG("watdfs_cli_open: file %s not exist, creating", path);
+
+            // If an application calls open with the O_CREAT flag and the file does not exist,
+            // watdfs_cli_mknod is called by FUSE before the actual watdfs_cli_open call.
+            // So we don't need to mknod, and watdfs_cli_mknod handles create file then upload.
+            // so we should be able to just open directly, and this case it should be fresh as well.
+        } else {
+            // we need to make sure the file is fresh in this case.
+            if (!is_fresh(userdata, path)) {
+                fxn_ret = download_file(userdata, path);
+
+                if (fxn_ret < 0) {
+                    DLOG("watdfs_cli_open failed to cache file '%s' info.", path);
+                    // probably not that severe to exit?
+                } else {
+                    // we validated the cache entry as we just downloaded it
+                    update_Tc(userdata, path);
+                }
+            }
+        }
+
+        // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
+        // for the file ( Tc). You can use the file modification time of the file to track T_client and T_server.
+
+        // now we estabilished that the file should exist and fresh, so we proceed with open now.
+
+        // When watdfs_cli_open is called, you should (try to) copy the file from the server to the client
+        // so the client can apply operations locally. Therefore, open should be called at both the client
+        // and the server as part of caching the file locally, resulting in two different file descriptors
+        // which you should track at the client. As part of these open calls,
+        // you should satisfy the mutual exclusion requirements (suggestions in Section 7.2.3).
+        
+        // --- Create  Metadata ---
+
+        metadata = &((struct Userdata *)userdata)->files_opened[path];
+
+        // --- Open local file ---
+
+        if (metadata->fileDesc_client == -1) {
+            DLOG("Failed to open existing file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            // clear this entry
+            ((struct Userdata *)userdata)->files_opened.erase(path);
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // --- Open remote file ---
+
+        rpc_ret = rpc_open(userdata, path, fi);
+
+        if (rpc_ret < 0) {
+            DLOG("Failed to open existing file %s with error code %d", path, rpc_ret);
+            fxn_ret = rpc_ret;
+
+            // close local opened file
+            rpc_ret = close(metadata->fileDesc_client);
+            if (rpc_ret < 0) {
+                DLOG("Failed to close local opened cached file %s with error code %d", path, rpc_ret);
+            }
+
+            // clear this entry
+            ((struct Userdata *)userdata)->files_opened.erase(path);
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // --- Update metadata ---
+        // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
+        // such that the file handle returned from this call respects the flag properties (e.g., read-only, write-only).
+        ((struct Userdata *)userdata)->files_opened[path].fileDesc_client = open(full_path, fi->flags);
+        // update_tc() of mknod call will not able to change this metadata, as the file not opened, metadata not exist.
+        ((struct Userdata *)userdata)->files_opened[path].Tc = time(NULL);
+        // easier to insert
+        ((struct Userdata *)userdata)->files_opened[path].fileHandle_server = fi->fh;
+
+    } else {
+        // --- File opened ---
+        // we cannot open an opened file..
+        DLOG("watdfs_cli_open: Failed to open already opend file '%s'", path);
+        free(full_path);
+        // You should use your already tracked metadata to determine 
+        // if the file has already been opened; if it has return -EMFILE.
+        return -EMFILE;
+    }
+}
+
+int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Called during open.
     // You should fill in fi->fh.
     DLOG("watdfs_cli_open called for '%s'", path);
@@ -1050,8 +1215,7 @@ int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     return fxn_ret;
 }
 
-int rpc_open(void *userdata, const char *path,
-             struct fuse_file_info *fi) {
+int rpc_open(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Called during open.
     // You should fill in fi->fh.
     DLOG("rpc_open called for '%s'", path);
@@ -1129,8 +1293,7 @@ int rpc_open(void *userdata, const char *path,
     return 0;
 }
 
-int rpc_release(void *userdata, const char *path,
-                struct fuse_file_info *fi) {
+int rpc_release(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Called during close, but possibly asynchronously.
     DLOG("rpc_release called for '%s'", path);
 
