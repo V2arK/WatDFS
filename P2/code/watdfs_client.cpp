@@ -208,7 +208,7 @@ bool is_fresh(void *userdata, const char *path) {
     struct Metadata *metadata = get_metadata(userdata, path);
 
     time_t T  = time(NULL);
-    time_t Tc = metadata->tc;
+    time_t Tc = metadata->Tc;
 
     if ((T - Tc) < ((Userdata *)userdata)->cache_interval) {
         // case (i)
@@ -795,6 +795,30 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
     if (metadata == NULL) {
         // --- File not opened ---
+
+        // check if file exists on server
+        struct stat *statbuf_remote = new struct stat;
+        rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+
+        if (rpc_ret >= 0) {
+            // we successfully get the file,  meaning we should not be able to mknod.
+            DLOG("watdfs_cli_mknod: File %s already exist", path);
+            fxn_ret = -EEXIST; // File Exist
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // We couldn't get statbuf for remote file, meaning such file not exist (is not ?)
+
+        // so we remove the local cached file (if it exists)
+        rpc_ret = unlink(full_path);
+        
+        if (rpc_ret < 0) {
+            DLOG("watdfs_cli_mknod warning: Failed to remove cached file %s with error code %d", path, errno);
+            // we don't really care if we removed it or not, because the file may not exists
+        }
+
+        // now we create the local file
         rpc_ret = mknod(full_path, mode, dev);
 
         if (rpc_ret < 0) {
@@ -805,7 +829,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             return fxn_ret;
         }
 
-        // otherwize lets update the file to server.
+        // we successfully create the file, lets update the file to server.
         rpc_ret = upload_file(userdata, path);
 
         if (rpc_ret < 0) {
@@ -819,30 +843,10 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
-            // Only read calls are allowed and should
-            // perform freshness checks before reads, as usual.
-            // Write calls should fail and return -EMFILE.
-            DLOG("watdfs_cli_mknod: cannot mknod readonly file %s", path);
-            fxn_ret = -errno;
-            free(full_path);
-            return fxn_ret;
-        } else { // WRITE mode
-            // Read calls should not perform freshness checks, as there
-            // would be no updates on the server due to write exclusion and this prevents
-            // overwriting local file updates if freshness condition has expired.
-            // Write calls should perform the freshness checks at the end of writes, as usual.
-
-            // if it's opened, we just upload to server?
-            rpc_ret = upload_file(userdata, path);
-
-            if (rpc_ret < 0) {
-                DLOG("watdfs_cli_mknod: failed to upload file %s, with errno %d", path, errno);
-                fxn_ret = rpc_ret;
-                free(full_path);
-                return fxn_ret;
-            }
-        }
+        DLOG("watdfs_cli_mknod: cannot mknod opened file %s", path);
+        fxn_ret = -EEXIST; // File Exist
+        free(full_path);
+        return fxn_ret;
     }
     
     return fxn_ret;
