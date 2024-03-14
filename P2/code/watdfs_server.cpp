@@ -21,24 +21,26 @@ INIT_LOG
 #include <map>
 #include "rw_lock.h"
 
-
+/*
 enum class OpType {
-    RD,
-    WR
+    RD, // read
+    WR, // write
+    N   // no operation
 };
 
-struct FileInfo{
-    OpType opType; // Enum to indicate read or write operation
-    rw_lock_t    *lock;          // Pointer to the lock
+struct FileInfo {
+    OpType     opType; // Type
+    rw_lock_t *lock;   // Pointer to the lock
 
     // Constructor to initialize the structure
     FileInfo(OpType opType, rw_lock_t *lockPtr) :
         opType(opType), lock(lockPtr) {
     }
 };
+*/
 
-// full path : fileInfo
-std::map<std::string, struct FileInfo> global_lock_info;
+// short path : fileInfo
+std::map<std::string, rw_lock *> global_lock_info;
 
 // ----------------------------------------------------------
 
@@ -457,7 +459,7 @@ int watdfs_utimensat(int *argTypes, void **args) {
     // Let sys_ret be the return code from the close system call.
 
     // If pathname is absolute (true for our case), then dirfd is ignored.
-    // The flags field is a bit mask that may be 0, 
+    // The flags field is a bit mask that may be 0,
     // or include the following constant, defined in <fcntl.h>
     int sys_ret = utimensat(0, full_path, ts, 0);
 
@@ -485,35 +487,45 @@ int watdfs_utimensat(int *argTypes, void **args) {
 
 // The server implementation of lock.
 int watdfs_lock(int *argTypes, void **args) {
-
     // Get the arguments.
 
     // The first argument is the path relative to the mountpoint.
-    char *short_path = (char *)args[0];
+    std::string short_path((char *)args[0]);
 
     // The second argument is the rw_lock_mode_t mode.
-
+    rw_lock_mode_t mode = *(rw_lock_mode_t *)args[1];
 
     // The third argument is the return code, which should be set be 0 or -errno.
-    int *ret = (int *)args[2];
-
-    // Get the local file name, so we call our helper function which appends
-    // the server_persist_dir to the given path.
-    char *full_path = get_full_path(short_path);
-
+    int *ret     = (int *)args[2];
+    int  sys_ret = 0;
     // Initially we set the return code to be 0.
     *ret = 0;
 
     // get lock info
-    auto it = global_lock_info.find(std::string(full_path));
+    auto it = global_lock_info.find(short_path);
 
-    if (it != global_lock_info.end()) { // exists
-        
-    } else { // non exist
-        
+    if (it == global_lock_info.end()) { // non exist
+        // create entry
+        //global_lock_info[short_path].opType = OpType::N; // right now there is no operations
+        global_lock_info[short_path]   = new rw_lock_t;
+        // init lock
+        rw_lock_init(global_lock_info[short_path]);
     }
 
-    return 0; // SPACE HOLDER
+    // now lock exists.
+
+    // try to acquire the lock in the given mode
+    sys_ret = rw_lock_lock(it->second, mode);
+
+    if (sys_ret < 0) {
+        *ret = -errno;
+        DLOG("Failed to obtain lock on file %s with errno %d", short_path, errno);
+    }
+
+    // successfully Obtain lock.
+
+    // The RPC call succeeded, so return 0.
+    return 0;
 }
 
 // The server implementation of unlock.
@@ -521,21 +533,36 @@ int watdfs_unlock(int *argTypes, void **args) {
     // Get the arguments.
 
     // The first argument is the path relative to the mountpoint.
-    char *short_path = (char *)args[0];
+    std::string short_path((char *)args[0]);
 
     // The second argument is the rw_lock_mode_t mode.
+    rw_lock_mode_t mode = *(rw_lock_mode_t *)args[1];
 
     // The third argument is the return code, which should be set be 0 or -errno.
-    int *ret = (int *)args[2];
-
-    // Get the local file name, so we call our helper function which appends
-    // the server_persist_dir to the given path.
-    char *full_path = get_full_path(short_path);
-
+    int *ret     = (int *)args[2];
+    int  sys_ret = 0;
     // Initially we set the return code to be 0.
     *ret = 0;
 
-    return 0; // SPACE HOLDER
+    // get lock info
+    auto it = global_lock_info.find(short_path);
+
+    if (it == global_lock_info.end()) { // non exist
+        *ret = -EPERM;                  // operation not permitted
+        DLOG("Failed to unlock file %s, lock DNE", short_path);
+    }
+    // now lock exists.
+
+    // try to unlock the lock in the given mode
+    sys_ret = rw_lock_unlock(it->second, mode);
+
+    if (sys_ret < 0) {
+        *ret = -errno;
+        DLOG("Failed to release lock on file %s with errno %d", short_path, errno);
+    }
+
+    // The RPC call succeeded, so return 0.
+    return 0;
 }
 // ------------------------------------------------------------
 // --------------------------- Main ---------------------------
