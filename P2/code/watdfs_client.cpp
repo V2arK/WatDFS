@@ -498,23 +498,24 @@ int upload_file(void *userdata, const char *path) {
     // --- Open local file for reading and writing ---
 
     // the file descriptor shall not share it with any other process in the system.
-    // int fileDesc_local = open(full_path, O_RDONLY);
-    int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
+    int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
+
+    //int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
 
     // Upon successful completion, the function shall open the file and
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-    /*
+    
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
         free(statbuf_local);
         free(full_path);
-        DLOG("RPC failed on open local file %s with error code %d", path, errno);
+        DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
-    */
+    
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
@@ -608,14 +609,15 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // --- update the file metadata at the server to match client ---
-    struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
-    rpc_ret               = rpc_utimensat(userdata, path, ts);
+    // --- get server file metadata (client follow server's time) ---
+    struct stat *statbuf_remote = new struct stat;
+    rpc_ret                    = rpc_getattr(userdata, path, statbuf_remote);
 
     if (rpc_ret < 0) {
-        DLOG("Failed to utimensat on server file %s with error code %d", path, errno);
+        DLOG("Failed to getattr from remote file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
         free(statbuf_local);
+        free(statbuf_remote);
         free(buf_content);
         free(full_path);
         free(fi);
@@ -642,10 +644,28 @@ int upload_file(void *userdata, const char *path) {
 
     // TODO: Unlock
 
-    free(fi);
+    // --- update the file metadata at the client to match server ---
+    struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
+    fxn_ret               = futimens(fileDesc_local, ts);
+
+    if (fxn_ret < 0) {
+        DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
+        fxn_ret = -errno;
+        free(statbuf_remote);
+        free(statbuf_local);
+        free(buf_content);
+        free(full_path);
+        free(fi);
+        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    free(statbuf_remote);
     free(statbuf_local);
     free(buf_content);
     free(full_path);
+    free(fi);
+    close(fileDesc_local);
 
     DLOG("upload_file on %s exit successfully", path);
 
@@ -1253,6 +1273,13 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
     // library.
     DLOG("watdfs_cli_write called for '%s'", path);
 
+    // Writes by a client should be applied to the local copy of the file, and periodically written back to the server. 
+    // You will do this by checking the freshness condition for writes at the end of a write/truncate call. 
+    // If at that time T, [(T - Tc) < t] or [T_client == T_server], then you can return immediately. 
+    // Otherwise, you must (synchronously) write client’s copy of the file back to the server and update T_server 
+    // to T_client. When the client is done with the file, as indicated by watdfs_cli_release, 
+    // the file should always be written back to the server.
+
     // The integer value watdfs_cli_getattr will return.
     int fxn_ret = 0;
     int rpc_ret = 0;
@@ -1367,6 +1394,16 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
     }
     // Return, we are done
     return fxn_ret;
+}
+
+int watdfs_cli_fsync(void *userdata, const char *path,
+                        struct fuse_file_info *fi) {
+    // Force a flush of file data.
+    DLOG("watdfs_cli_fsync called for '%s'", path);
+
+    // If a client application issues fsync, then the client’s copy of the file 
+    // must be written to the server immediately and T_server and Tc should be updated.
+    // If the file is opened in read only mode, return an error.
 }
 
 // -------------------- P1 RPC functions --------------------
