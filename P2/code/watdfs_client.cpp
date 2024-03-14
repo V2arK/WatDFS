@@ -215,6 +215,7 @@ time_t *get_Tc(void *userdata, const char *path) {
         return NULL;
     }
 }
+
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
@@ -445,15 +446,7 @@ int download_file(void *userdata, const char *path) {
     close(fileDesc_local);
 
     // --- Update Tc ---
-    time_t *Tc = get_Tc(userdata, path);
-
-    if (Tc == NULL) {
-        // such file is not cached before, add to our list
-        ((struct Userdata *)userdata)->Tc[std::string(path)] = time(NULL);
-    } else {
-        // just update the Tc
-        *Tc = time(NULL);
-    }
+    update_Tc(userdata, path);
 
     free(fi);
     free(statbuf_remote);
@@ -672,6 +665,45 @@ int upload_file(void *userdata, const char *path) {
     return fxn_ret;
 }
 
+// this function update file if not fresh,
+// and download + update Tc if file is not cached.
+// fail if file not exist on server.
+int update_file(void *userdata, const char *path) {
+    // The integer value function will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    // You should try to open and transfer the file from the server,
+    // perform the operation locally, transfer the file back to the server
+    // (for write calls), and close the file.
+
+    // Get the local file name, so we call our helper function which appends
+    // the server_persist_dir to the given path.
+    char *full_path = get_full_path(userdata, path);
+
+    // firstly, check if local file exists + is fresh
+    if (!is_fresh(userdata, path)) {
+        DLOG("update_file accessing new file '%s', sending RPC ...", path);
+
+        // sucessfully get file attr from server
+        // try to open and transfer the file from the server.
+        rpc_ret = download_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            // some error encountered.
+            DLOG("update_file failed to download file '%s' info.", path);
+            // free memories
+            free(full_path);
+            // exit
+            return rpc_ret;
+        }
+    }
+
+    // is fresh, just return
+    free(full_path);
+    return fxn_ret;
+}
+
 // ---------------------- CLI functions ----------------------
 
 // SETUP AND TEARDOWN
@@ -757,69 +789,14 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     if (metadata == NULL) {
         // --- File not opened ---
 
-        // You should try to open and transfer the file from the server,
-        // perform the operation locally, transfer the file back to the server
-        // (for write calls), and close the file.
-
-        // so we don't check if local cache exists?
-
-        DLOG("watdfs_cli_getattr accessing new file '%s', sending RPC ...", path);
-
-        // we attempt to get the statbuf from the server.
-        struct stat *statbuf_remote = new struct stat;
-        // MAKE THE RPC CALL
-        int rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+        // download / update file if it's not fresh, fail if file not exist
+        rpc_ret = update_file(userdata, path);
 
         if (rpc_ret < 0) {
-            // some error encountered.
-            DLOG("watdfs_cli_getattr failed to obtain file '%s' info, maybe it DNE.", path);
-            // free memories
-            free(statbuf_remote);
-            free(full_path);
-            // exit
-            return rpc_ret;
-        }
-
-        // sucessfully get file attr from server
-        // try to open and transfer the file from the server.
-        rpc_ret = download_file(userdata, path);
-
-        if (rpc_ret < 0) {
-            // some error encountered.
-            DLOG("watdfs_cli_getattr failed to download file '%s' info.", path);
-            // free memories
-            free(statbuf_remote);
-            free(full_path);
-            // exit
-            return rpc_ret;
-        }
-
-        // the file descriptor shall not share it with any other process in the system.
-        int fileDesc_local = open(full_path, O_RDONLY);
-
-        if (fileDesc_local == -1) {
-            DLOG("Failed to open existing file %s with error code %d", path, errno);
-            fxn_ret = -errno;
-            free(statbuf_remote);
-            free(full_path);
+            fxn_ret = rpc_ret;
+            DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
             return fxn_ret;
         }
-
-        // fill statbuf
-        rpc_ret = stat(full_path, statbuf);
-        rpc_ret = close(fileDesc_local);
-
-        // done stuff, return.
-        free(statbuf_remote);
-        free(full_path);
-
-        if (rpc_ret < 0) {
-            DLOG("Failed to read buf / close file %s with error code %d", path, errno);
-            fxn_ret = -errno;
-            return fxn_ret;
-        }
-
-        return rpc_ret;
 
     } else {
         // --- File opened ---
@@ -827,18 +804,14 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
 
-            if (!is_fresh(userdata, path)) {
-                // note download_file updates Tc.
-                rpc_ret = download_file(userdata, path);
-                if (rpc_ret < 0) {
-                    // download cache fail
-                    DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
-                    fxn_ret = rpc_ret;
-                    return fxn_ret;
-                }
-            }
+            // download / update file if it's not fresh, fail if file not exist
+            rpc_ret = update_file(userdata, path);
 
-            // file is fresh now (also possible if failed to download, don't know how to handle)
+            if (rpc_ret < 0) {
+                fxn_ret = rpc_ret;
+                DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
+                return fxn_ret;
+            }
 
         } else {
             // Read calls should not perform freshness checks, as there
@@ -848,6 +821,8 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
             void *userdata; // space holder
         }
+
+        // now file must exists.
 
         // fill statbuf
         rpc_ret = stat(full_path, statbuf);
@@ -907,6 +882,8 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             // we don't really care if we removed it or not, because the file may not exists
         }
 
+        // TODO: Need to remote Tc?
+
         // now we create the local file
         rpc_ret = mknod(full_path, mode, dev);
 
@@ -928,6 +905,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             return fxn_ret;
         }
 
+        // get server creation time
         rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
 
         if (rpc_ret < 0) {
@@ -938,7 +916,6 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
         }
 
         // set times same as the remote on local
-
         int fileDesc_local = open(full_path, O_WRONLY);
 
         if (fileDesc_local == -1) {
@@ -959,6 +936,9 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             close(fileDesc_local);
             return fxn_ret;
         }
+
+        // update Tc
+        update_Tc(userdata, path);
 
         close(fileDesc_local);
         return fxn_ret;
@@ -1053,19 +1033,15 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             DLOG("watdfs_cli_open: file %s not exist, but with O_CREAT", path);
             free(full_path);
             return -ENOENT;
+        }
 
-        } else {
-            // we need to make sure the file is fresh in this case.
-            if (!is_fresh(userdata, path)) {
-                // note download_file updates Tc.
-                rpc_ret = download_file(userdata, path);
-                if (rpc_ret < 0) {
-                    // download cache fail
-                    DLOG("watdfs_cli_open failed to cache file '%s' info.", path);
-                    fxn_ret = rpc_ret;
-                    return fxn_ret;
-                }
-            }
+        // download / update file if it's not fresh, fail if file not exist
+        rpc_ret = update_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            fxn_ret = rpc_ret;
+            DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
+            return fxn_ret;
         }
 
         // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
@@ -1350,8 +1326,16 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
 
     if (metadata == NULL) {
         // --- File not opened ---
-        DLOG("watdfs_cli_truncate: File '%s' not opened", path);
-        return -EPERM; /* operation not permitted */
+
+        // download / update file if it's not fresh, fail if file not exist
+        rpc_ret = update_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            fxn_ret = rpc_ret;
+            DLOG("watdfs_cli_truncate: Failed to update local file '%s'", path);
+            return fxn_ret;
+        }
+
     } else {
         // --- File opened ---
         if (metadata->client_flag == O_RDONLY) {
@@ -1365,34 +1349,39 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
 
-            // --- get file attributes from the client ---
-            char *full_path = get_full_path(userdata, path);
-
-            rpc_ret = truncate(full_path, newsize);
-
-            if (rpc_ret < 0) {
-                fxn_ret = -errno;
-                DLOG("watdfs_cli_truncate failed to write to truncate file '%s', errno %d.", path, fxn_ret);
-                free(full_path);
-                return fxn_ret;
-            }
-
-            // update Tc
-            update_Tc(userdata, path);
-
-            // freshness check
-            if (!is_fresh(userdata, path)) {
-                rpc_ret = upload_file(userdata, path);
-
-                if (rpc_ret < 0) {
-                    // Upload failed.
-                    DLOG("watdfs_cli_truncate failed to upload cache file '%s' info.", path);
-                    fxn_ret = rpc_ret;
-                    return fxn_ret;
-                }
-            }
+            void *userdata; // space holder
         }
     }
+
+    // at this point, file should exists.
+
+    // --- get file attributes from the client ---
+    char *full_path = get_full_path(userdata, path);
+
+    rpc_ret = truncate(full_path, newsize);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        DLOG("watdfs_cli_truncate failed to write to truncate file '%s', errno %d.", path, fxn_ret);
+        free(full_path);
+        return fxn_ret;
+    }
+
+    // update Tc
+    update_Tc(userdata, path);
+
+    // freshness check
+    if (!is_fresh(userdata, path)) {
+        rpc_ret = upload_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            // Upload failed.
+            DLOG("watdfs_cli_truncate failed to upload cache file '%s' info.", path);
+            fxn_ret = rpc_ret;
+            return fxn_ret;
+        }
+    }
+
     // Return, we are done
     return fxn_ret;
 }
@@ -1447,7 +1436,75 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
 }
 
 // CHANGE METADATA
-int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2]) {
+int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec ts[2]) {
+    // Change file access and modification times.
+    DLOG("watdfs_cli_utimensat called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    char *full_path = get_full_path(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        
+        // download / update file if it's not fresh, fail if file not exist
+        rpc_ret = update_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            fxn_ret = rpc_ret;
+            DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
+            return fxn_ret;
+        }
+
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_utimensat: cannot write read only file '%s'", path);
+            free(full_path);
+            return -EMFILE; /* Too many open files */
+        }
+    }
+
+    // Read calls should not perform freshness checks, as there
+    // would be no updates on the server due to write exclusion and this prevents
+    // overwriting local file updates if freshness condition has expired.
+    // Write calls should perform the freshness checks at the end of writes, as usual.
+
+    // If pathname is absolute (true for our case), then dirfd is ignored.
+    rpc_ret = utimensat(0, full_path, ts, 0);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        DLOG("watdfs_cli_utimensat failed to write to truncate file '%s', errno %d.", path, fxn_ret);
+        free(full_path);
+        return fxn_ret;
+    }
+
+    // update Tc
+    update_Tc(userdata, path);
+
+    // freshness check
+    if (!is_fresh(userdata, path)) {
+        rpc_ret = upload_file(userdata, path);
+
+        if (rpc_ret < 0) {
+            // Upload failed.
+            DLOG("watdfs_cli_utimensat failed to upload cache file '%s' info.", path);
+            fxn_ret = rpc_ret;
+            free(full_path);
+            return fxn_ret;
+        }
+    }
+
+    // Return, we are done
+    free(full_path);
+    return fxn_ret;
 }
 
 // -------------------- P1 RPC functions --------------------
