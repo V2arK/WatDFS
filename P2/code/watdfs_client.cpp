@@ -1304,6 +1304,71 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
     return fxn_ret;
 }
 
+int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
+    // Change the file size to newsize.
+
+    // This function changes the size of the file to newsize.
+    // If the file previously was larger than this size, the extra data is deleted.
+    // If the file previously was shorter, it is extended,
+    // and the extended part is filled in with null bytes (‘\0’).
+
+    DLOG("watdfs_cli_truncate called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("watdfs_cli_truncate: File '%s' not opened", path);
+        return -EPERM; /* operation not permitted */
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_truncate: cannot write read only file '%s'", path);
+            return -EMFILE; /* Too many open files */
+        } else {
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            // --- get file attributes from the client ---
+            char *full_path = get_full_path(userdata, path);
+
+            rpc_ret = truncate(full_path, newsize);
+
+            if (rpc_ret < 0) {
+                fxn_ret = -errno;
+                DLOG("watdfs_cli_truncate failed to write to truncate file '%s', errno %d.", path, fxn_ret);
+                free(full_path);
+                return fxn_ret;
+            }
+
+            // update Tc
+            update_Tc(userdata, path);
+
+            // freshness check
+            if (!is_fresh(userdata, path)) {
+                rpc_ret = upload_file(userdata, path);
+
+                if (rpc_ret < 0) {
+                    // Upload failed.
+                    DLOG("watdfs_cli_truncate failed to upload cache file '%s' info.", path);
+                    fxn_ret = rpc_ret;
+                    return fxn_ret;
+                }
+            }
+        }
+    }
+    // Return, we are done
+    return fxn_ret;
+}
+
 // -------------------- P1 RPC functions --------------------
 
 // the getattr RPC function
