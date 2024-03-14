@@ -279,6 +279,7 @@ void update_Tc(void *userdata, const char *path) {
     }
 }
 
+// we will open file on O_WRONLY.
 int download_file(void *userdata, const char *path) {
     DLOG("Start to download file %s", path);
 
@@ -359,7 +360,7 @@ int download_file(void *userdata, const char *path) {
     char *full_path = get_full_path(userdata, path);
     // Open for reading and writing.
     // the file descriptor shall not share it with any other process in the system.
-    int fileDesc_local = open(full_path, O_RDWR);
+    int fileDesc_local = open(full_path, O_WRONLY);
 
     // Upon successful completion, the function shall open the file and
     // return a non-negative integer representing the lowest numbered unused file descriptor.
@@ -464,7 +465,7 @@ int download_file(void *userdata, const char *path) {
     return fxn_ret;
 }
 
-// we need the file already opened before we can upload.
+// we will open file on O_RDWR.
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
@@ -500,13 +501,13 @@ int upload_file(void *userdata, const char *path) {
     // the file descriptor shall not share it with any other process in the system.
     int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
 
-    //int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
+    // int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
 
     // Upon successful completion, the function shall open the file and
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-    
+
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -515,7 +516,6 @@ int upload_file(void *userdata, const char *path) {
         DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
-    
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
@@ -611,7 +611,7 @@ int upload_file(void *userdata, const char *path) {
 
     // --- get server file metadata (client follow server's time) ---
     struct stat *statbuf_remote = new struct stat;
-    rpc_ret                    = rpc_getattr(userdata, path, statbuf_remote);
+    rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
     if (rpc_ret < 0) {
         DLOG("Failed to getattr from remote file %s with error code %d", full_path, errno);
@@ -1273,11 +1273,11 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
     // library.
     DLOG("watdfs_cli_write called for '%s'", path);
 
-    // Writes by a client should be applied to the local copy of the file, and periodically written back to the server. 
-    // You will do this by checking the freshness condition for writes at the end of a write/truncate call. 
-    // If at that time T, [(T - Tc) < t] or [T_client == T_server], then you can return immediately. 
-    // Otherwise, you must (synchronously) write client’s copy of the file back to the server and update T_server 
-    // to T_client. When the client is done with the file, as indicated by watdfs_cli_release, 
+    // Writes by a client should be applied to the local copy of the file, and periodically written back to the server.
+    // You will do this by checking the freshness condition for writes at the end of a write/truncate call.
+    // If at that time T, [(T - Tc) < t] or [T_client == T_server], then you can return immediately.
+    // Otherwise, you must (synchronously) write client’s copy of the file back to the server and update T_server
+    // to T_client. When the client is done with the file, as indicated by watdfs_cli_release,
     // the file should always be written back to the server.
 
     // The integer value watdfs_cli_getattr will return.
@@ -1397,13 +1397,54 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
 }
 
 int watdfs_cli_fsync(void *userdata, const char *path,
-                        struct fuse_file_info *fi) {
+                     struct fuse_file_info *fi) {
     // Force a flush of file data.
     DLOG("watdfs_cli_fsync called for '%s'", path);
 
-    // If a client application issues fsync, then the client’s copy of the file 
+    // If a client application issues fsync, then the client’s copy of the file
     // must be written to the server immediately and T_server and Tc should be updated.
     // If the file is opened in read only mode, return an error.
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("watdfs_cli_truncate: File '%s' not opened", path);
+        return -EPERM; /* operation not permitted */
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_truncate: cannot write read only file '%s'", path);
+            return -EMFILE; /* Too many open files */
+        } else {
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            // interestingly we will open the file again in O_RDWR again
+            rpc_ret = upload_file(userdata, path);
+
+            if (rpc_ret < 0) {
+                // Upload failed.
+                DLOG("watdfs_cli_fsync failed to upload cache file '%s' info.", path);
+                fxn_ret = rpc_ret;
+                return fxn_ret;
+            }
+
+            // update Tc
+            update_Tc(userdata, path);
+        }
+    }
+
+    // Return, we are done
+    return fxn_ret;
 }
 
 // -------------------- P1 RPC functions --------------------
