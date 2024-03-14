@@ -318,6 +318,7 @@ int download_file(void *userdata, const char *path) {
     fi->flags = O_RDONLY;
     rpc_ret   = rpc_open(userdata, path, fi);
 
+    // We just open READ ONLY, so it should not be causing any issue even if someone opened it for WRITE.
     if (rpc_ret < 0) {
         fxn_ret = -errno;
         free(fi);
@@ -638,7 +639,7 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
     */
-   
+
     // TODO: Unlock
 
     free(fi);
@@ -895,17 +896,50 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             return fxn_ret;
         }
 
-        // we successfully create the file, lets update the file to server.
-        rpc_ret = upload_file(userdata, path);
+        // create the file on the server as well
+        rpc_ret = rpc_mknod(userdata, path, mode, dev);
 
         if (rpc_ret < 0) {
-            // maybe file exists
-            DLOG("watdfs_cli_mknod: Failed to upload %s to server with error code %d", path, errno);
-            fxn_ret = -rpc_ret;
-
+            DLOG("watdfs_cli_mknod: Failed to mknod on server %s with error code %d", path, rpc_ret);
+            fxn_ret = rpc_ret;
             free(full_path);
             return fxn_ret;
         }
+
+        rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+
+        if (rpc_ret < 0) {
+            DLOG("watdfs_cli_mknod: Failed to geattr on remote file %s with errno %d", path, rpc_ret);
+            fxn_ret = rpc_ret;
+            free(full_path);
+            return fxn_ret;
+        }
+
+        // set times same as the remote on local
+
+        int fileDesc_local = open(full_path, O_WRONLY);
+
+        if (fileDesc_local == -1) {
+            DLOG("Failed to open existing file %s with error code %d", path, errno);
+            fxn_ret = -errno;
+            free(full_path);
+            return fxn_ret;
+        }
+
+        struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
+        fxn_ret               = futimens(fileDesc_local, ts);
+
+        if (fxn_ret < 0) {
+            DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
+            fxn_ret = -errno;
+            free(statbuf_remote);
+            free(full_path);
+            close(fileDesc_local);
+            return fxn_ret;
+        }
+
+        close(fileDesc_local);
+        return fxn_ret;
 
     } else {
         // --- File opened ---
