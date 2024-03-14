@@ -529,7 +529,7 @@ int upload_file(void *userdata, const char *path) {
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-    
+
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -538,7 +538,6 @@ int upload_file(void *userdata, const char *path) {
         DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
-    
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
@@ -576,7 +575,6 @@ int upload_file(void *userdata, const char *path) {
 
     // Create file should be handled by open and mknod
 
-    
     int rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
@@ -662,7 +660,7 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Release server file ---
-    
+
     rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {

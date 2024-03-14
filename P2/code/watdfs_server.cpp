@@ -23,9 +23,8 @@ INIT_LOG
 
 
 enum class OpType {
-    READ,
-    WRITE,
-    BOTH
+    RD,
+    WR
 };
 
 struct FileInfo{
