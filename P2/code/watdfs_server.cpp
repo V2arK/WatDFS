@@ -803,7 +803,7 @@ int main(int argc, char *argv[]) {
         arg_types[3] = 0;
 
         // We need to register the function with the types and the name.
-        ret = rpcRegister((char *)"truncate", arg_types, watdfs_open);
+        ret = rpcRegister((char *)"truncate", arg_types, watdfs_truncate);
         if (ret < 0) {
             // It may be useful to have debug-printing here.
             DLOG("Register truncate failed.");
