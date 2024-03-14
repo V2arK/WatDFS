@@ -5,6 +5,7 @@
 
 #include "rpc.h"
 #include "debug.h"
+#include "rw_lock.h"
 INIT_LOG
 
 #include <sys/stat.h>
@@ -19,7 +20,7 @@ INIT_LOG
 
 #include <string>
 #include <map>
-#include "rw_lock.h"
+
 
 /*
 enum class OpType {
@@ -506,10 +507,15 @@ int watdfs_lock(int *argTypes, void **args) {
 
     if (it == global_lock_info.end()) { // non exist
         // create entry
-        //global_lock_info[short_path].opType = OpType::N; // right now there is no operations
-        global_lock_info[short_path]   = new rw_lock_t;
+        // global_lock_info[short_path].opType = OpType::N; // right now there is no operations
+        global_lock_info[short_path] = new rw_lock_t;
         // init lock
-        rw_lock_init(global_lock_info[short_path]);
+        sys_ret = rw_lock_init(global_lock_info[short_path]);
+
+        if (sys_ret < 0) {
+            *ret = -errno;
+            DLOG("Failed to create lock on file %s with errno %d", short_path.c_str(), errno);
+        }
     }
 
     // now lock exists.
@@ -519,7 +525,7 @@ int watdfs_lock(int *argTypes, void **args) {
 
     if (sys_ret < 0) {
         *ret = -errno;
-        DLOG("Failed to obtain lock on file %s with errno %d", short_path, errno);
+        DLOG("Failed to obtain lock on file %s with errno %d", short_path.c_str(), errno);
     }
 
     // successfully Obtain lock.
@@ -549,7 +555,7 @@ int watdfs_unlock(int *argTypes, void **args) {
 
     if (it == global_lock_info.end()) { // non exist
         *ret = -EPERM;                  // operation not permitted
-        DLOG("Failed to unlock file %s, lock DNE", short_path);
+        DLOG("Failed to unlock file %s, lock DNE", short_path.c_str());
     }
     // now lock exists.
 
@@ -558,7 +564,7 @@ int watdfs_unlock(int *argTypes, void **args) {
 
     if (sys_ret < 0) {
         *ret = -errno;
-        DLOG("Failed to release lock on file %s with errno %d", short_path, errno);
+        DLOG("Failed to release lock on file %s with errno %d", short_path.c_str(), errno);
     }
 
     // The RPC call succeeded, so return 0.
