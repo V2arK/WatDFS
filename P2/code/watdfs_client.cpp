@@ -11,6 +11,7 @@ INIT_LOG
 #include "rpc.h"
 
 // --------------------------- P2 ---------------------------
+#include "rw_lock.h"
 #include <string>
 #include <map>
 

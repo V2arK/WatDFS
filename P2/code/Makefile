@@ -7,8 +7,8 @@
 # make zip --- cleans and produces a zip file
 
 # Add files you want to go into your client library here.
-WATDFS_CLI_FILES= watdfs_client.cpp
-WATDFS_CLI_OBJS= watdfs_client.o
+WATDFS_CLI_FILES= watdfs_client.cpp rw_lock.cpp
+WATDFS_CLI_OBJS= watdfs_client.o rw_lock.o
 
 # Add files you want to go into your server here.
 WATDFS_SERVER_FILES = watdfs_server.cpp rw_lock.cpp

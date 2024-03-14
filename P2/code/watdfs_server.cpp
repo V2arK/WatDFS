@@ -5,7 +5,6 @@
 
 #include "rpc.h"
 #include "debug.h"
-#include "rw_lock.h"
 INIT_LOG
 
 #include <sys/stat.h>
@@ -17,7 +16,7 @@ INIT_LOG
 #include <fuse.h>
 
 // --------------------------- P2 ---------------------------
-
+#include "rw_lock.h"
 #include <string>
 #include <map>
 
