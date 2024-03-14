@@ -508,9 +508,9 @@ int watdfs_lock(int *argTypes, void **args) {
     auto it = global_lock_info.find(std::string(full_path));
 
     if (it != global_lock_info.end()) { // exists
-        void* it;
+        
     } else { // non exist
-        void *it;
+        
     }
 
     return 0; // SPACE HOLDER
@@ -867,6 +867,64 @@ int main(int argc, char *argv[]) {
             return ret;
         }
         DLOG("Register utimensat succeed.");
+    }
+
+    /* ------------------------ P2 ------------------------ */
+
+    /* lock */
+    {
+        // There are 3 args for the function (see watdfs_client.cpp for more
+        // detail).
+        int arg_types[4];
+        // First is the path.
+        arg_types[0] =
+            (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | 1u;
+
+        // Argument 2: mode (input, ARG_INT)
+        arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+
+        // Argument 3: return code (output, int)
+        arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+
+        // Finally we fill in the null terminator.
+        arg_types[3] = 0;
+
+        // We need to register the function with the types and the name.
+        ret = rpcRegister((char *)"lock", arg_types, watdfs_lock);
+        if (ret < 0) {
+            // It may be useful to have debug-printing here.
+            DLOG("Register lock failed.");
+            return ret;
+        }
+        DLOG("Register lock succeed.");
+    }
+
+    /* unlock */
+    {
+        // There are 3 args for the function (see watdfs_client.cpp for more
+        // detail).
+        int arg_types[4];
+        // First is the path.
+        arg_types[0] =
+            (1u << ARG_INPUT) | (1u << ARG_ARRAY) | (ARG_CHAR << 16u) | 1u;
+
+        // Argument 2: mode (input, ARG_INT)
+        arg_types[1] = (1u << ARG_INPUT) | (ARG_INT << 16u);
+
+        // Argument 3: return code (output, int)
+        arg_types[2] = (1u << ARG_OUTPUT) | (ARG_INT << 16u);
+
+        // Finally we fill in the null terminator.
+        arg_types[3] = 0;
+
+        // We need to register the function with the types and the name.
+        ret = rpcRegister((char *)"unlock", arg_types, watdfs_unlock);
+        if (ret < 0) {
+            // It may be useful to have debug-printing here.
+            DLOG("Register unlock failed.");
+            return ret;
+        }
+        DLOG("Register unlock succeed.");
     }
 
     // TODO: Hand over control to the RPC library by calling `rpcExecute`.
