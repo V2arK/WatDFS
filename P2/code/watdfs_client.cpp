@@ -1128,15 +1128,10 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
     int fxn_ret = 0;
     int rpc_ret = 0;
 
-    // Get the local file name, so we call our helper function which appends
-    // the server_persist_dir to the given path.
-    char *full_path = get_full_path(userdata, path);
-
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
         // --- File not opened ---
-        free(full_path);
         DLOG("watdfs_cli_release: File '%s' not opened", path);
         return -ENOENT;
 
@@ -1150,7 +1145,6 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
             rpc_ret = upload_file(userdata, path);
 
             if (rpc_ret < 0) {
-                free(full_path);
                 fxn_ret = rpc_ret;
                 DLOG("watdfs_cli_release: Failed to upload file '%s' with errno %d before close", path, fxn_ret);
                 return fxn_ret;
@@ -1159,10 +1153,10 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
         // --- Close Server File ---
 
+        // IMPORTANT: We left fi->fh as the remote file handler in watdfs_cli_open().
         rpc_ret = rpc_release(userdata, path, fi);
 
         if (rpc_ret = 0) {
-            free(full_path);
             fxn_ret = rpc_ret;
             DLOG("watdfs_cli_release: Server file '%s' close failed with errno %d", path, fxn_ret);
             return fxn_ret;
@@ -1172,7 +1166,6 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
         rpc_ret = close(metadata->fileDesc_client);
 
         if (rpc_ret = 0) {
-            free(full_path);
             fxn_ret = -errno;
             DLOG("watdfs_cli_release: File '%s' close failed with errno %d", path, fxn_ret);
             return fxn_ret;
@@ -1180,6 +1173,8 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
         // clear this entry
         ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
+        
+        return fxn_ret;
     }
 }
 
