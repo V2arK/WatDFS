@@ -178,13 +178,13 @@ int unlock(const char *path, rw_lock_mode_t mode) {
 // Copy from watdfs_server. Used to extend the path on to cache path.
 char *get_full_path(void *userdata, const char *short_path) {
     int short_path_len = strlen(short_path);
-    int dir_len        = strlen(((Userdata *)userdata)->cache_path);
+    int dir_len        = strlen(((struct Userdata *)userdata)->cache_path);
     int full_len       = dir_len + short_path_len + 1;
 
     char *full_path = (char *)malloc(full_len);
 
     // First fill in the directory.
-    strcpy(full_path, ((Userdata *)userdata)->cache_path);
+    strcpy(full_path, ((struct Userdata *)userdata)->cache_path);
     // Then append the path.
     strcat(full_path, short_path);
     DLOG("Full path: %s\n", full_path);
@@ -195,9 +195,9 @@ char *get_full_path(void *userdata, const char *short_path) {
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
 struct Metadata *get_metadata_opened(void *userdata, const char *path) {
-    auto it = ((Userdata *)userdata)->files_opened.find(std::string(path));
+    auto it = ((struct Userdata *)userdata)->files_opened.find(std::string(path));
 
-    if (it != ((Userdata *)userdata)->files_opened.end()) { // exists
+    if (it != ((struct Userdata *)userdata)->files_opened.end()) { // exists
         return &(it->second);
     } else { // non exist
         return NULL;
@@ -207,9 +207,9 @@ struct Metadata *get_metadata_opened(void *userdata, const char *path) {
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
 time_t * get_Tc(void *userdata, const char *path) {
-    auto it = ((Userdata *)userdata)->Tc.find(std::string(path));
+    auto it = ((struct Userdata *)userdata)->Tc.find(std::string(path));
 
-    if (it != ((Userdata *)userdata)->Tc.end()) { // exists
+    if (it != ((struct Userdata *)userdata)->Tc.end()) { // exists
         return &(it->second);
     } else { // non exist
         return NULL;
@@ -221,7 +221,7 @@ bool is_fresh(void *userdata, const char *path) {
     time_t Tc = *get_Tc(userdata, path);
     time_t T  = time(NULL);
 
-    if ((T - Tc) < ((Userdata *)userdata)->cache_interval) {
+    if ((T - Tc) < ((struct Userdata *)userdata)->cache_interval) {
         // case (i)
         return true;
     }
