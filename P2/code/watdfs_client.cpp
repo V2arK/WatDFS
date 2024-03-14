@@ -29,6 +29,27 @@ struct Userdata {
     std::map<std::string, struct Metadata> files_opened;
 };
 
+// func declarations
+int rpc_getattr(void *userdata, const char *path, struct stat *statbuf);
+
+int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev);
+
+int rpc_open(void *userdata, const char *path, struct fuse_file_info *fi);
+
+int rpc_release(void *userdata, const char *path, struct fuse_file_info *fi);
+
+int rpc_read(void *userdata, const char *path, char *buf, size_t size,
+             off_t offset, struct fuse_file_info *fi);
+
+int rpc_write(void *userdata, const char *path, const char *buf,
+              size_t size, off_t offset, struct fuse_file_info *fi);
+
+int rpc_truncate(void *userdata, const char *path, off_t newsize);
+
+int rpc_fsync(void *userdata, const char *path, struct fuse_file_info *fi);
+
+int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2]);
+
 // helpers
 
 // 7.2.4
@@ -253,14 +274,14 @@ bool is_fresh(void *userdata, const char *path) {
     if (statbuf_local->st_mtime == statbuf_remote->st_mtime) {
         // case (ii)
         free(full_path);
-        free(statbuf_local);
-        free(statbuf_remote);
+        delete (statbuf_local);
+        delete (statbuf_remote);
         return true;
     }
 
     free(full_path);
-    free(statbuf_local);
-    free(statbuf_remote);
+    delete (statbuf_local);
+    delete (statbuf_remote);
 
     return false;
 }
@@ -304,7 +325,7 @@ int download_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = -errno;
-        free(statbuf_remote);
+        delete (statbuf_remote);
         DLOG("RPC failed on rpc_getattr file %s with error code %d", path, errno);
         return fxn_ret;
     }
@@ -314,7 +335,7 @@ int download_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        free(statbuf_remote);
+        delete (statbuf_remote);
         DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
@@ -331,8 +352,8 @@ int download_file(void *userdata, const char *path) {
         unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
 
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
+        delete (fi);
+        delete (statbuf_remote);
         DLOG("RPC failed on watdfs_cli_open while downloading file on file %s with error code %d", path, errno);
         return fxn_ret;
     }
@@ -345,9 +366,9 @@ int download_file(void *userdata, const char *path) {
         unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
 
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
+        delete (fi);
+        delete (statbuf_remote);
+        delete (buf_content);
         DLOG("RPC failed on watdfs_cli_read while reading content on file %s with error code %d", path, errno);
         return fxn_ret;
     }
@@ -360,9 +381,9 @@ int download_file(void *userdata, const char *path) {
 
         DLOG("Failed to release file %s from server with error code %d", path, errno);
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
+        delete (fi);
+        delete (statbuf_remote);
+        delete (buf_content);
         return fxn_ret;
     }
 
@@ -371,7 +392,7 @@ int download_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        free(statbuf_remote);
+        delete (statbuf_remote);
         DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
@@ -401,7 +422,7 @@ int download_file(void *userdata, const char *path) {
         if (fxn_ret < 0) {
             DLOG("Failed to create file %s with error code %d", path, errno);
             fxn_ret = -errno;
-            free(statbuf_remote);
+            delete (statbuf_remote);
             free(full_path);
             return fxn_ret;
         }
@@ -412,7 +433,7 @@ int download_file(void *userdata, const char *path) {
         if (fileDesc_local == -1) {
             DLOG("Failed to open existing file %s with error code %d", path, errno);
             fxn_ret = -errno;
-            free(statbuf_remote);
+            delete (statbuf_remote);
             free(full_path);
             return fxn_ret;
         }
@@ -424,9 +445,9 @@ int download_file(void *userdata, const char *path) {
     if (fxn_ret < 0) {
         DLOG("Failed to truncate file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
+        delete (fi);
+        delete (statbuf_remote);
+        delete (buf_content);
         free(full_path);
         close(fileDesc_local);
         return fxn_ret;
@@ -439,9 +460,9 @@ int download_file(void *userdata, const char *path) {
     if (fxn_ret < 0) {
         DLOG("Failed to write into file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
+        delete (fi);
+        delete (statbuf_remote);
+        delete (buf_content);
         free(full_path);
         close(fileDesc_local);
         return fxn_ret;
@@ -454,10 +475,10 @@ int download_file(void *userdata, const char *path) {
     if (fxn_ret < 0) {
         DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(statbuf_remote);
-        free(buf_content);
+        delete (statbuf_remote);
+        delete (buf_content);
         free(full_path);
-        free(fi);
+        delete (fi);
         close(fileDesc_local);
         return fxn_ret;
     }
@@ -468,9 +489,9 @@ int download_file(void *userdata, const char *path) {
     // --- Update Tc ---
     update_Tc(userdata, path);
 
-    free(fi);
-    free(statbuf_remote);
-    free(buf_content);
+    delete (fi);
+    delete (statbuf_remote);
+    delete (buf_content);
     free(full_path);
 
     DLOG("download_file on %s exit successfully", path);
@@ -482,9 +503,10 @@ int download_file(void *userdata, const char *path) {
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
+    /*
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
-    /*
+
     if (metadata == NULL) {
         // --- File not opened ---
         DLOG("Upload: failed to upload un-opened file local file %s ", path);
@@ -512,7 +534,7 @@ int upload_file(void *userdata, const char *path) {
 
     if (fxn_ret < 0) {
         fxn_ret = -errno;
-        free(statbuf_local);
+        delete (statbuf_local);
         free(full_path);
         DLOG("RPC failed on getting stat on file %s with error code %d", path, errno);
         return fxn_ret;
@@ -533,7 +555,7 @@ int upload_file(void *userdata, const char *path) {
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
-        free(statbuf_local);
+        delete (statbuf_local);
         free(full_path);
         DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
@@ -545,8 +567,8 @@ int upload_file(void *userdata, const char *path) {
 
     if (fxn_ret < 0) {
         fxn_ret = -errno;
-        free(statbuf_local);
-        free(buf_content);
+        delete (statbuf_local);
+        delete (buf_content);
         free(full_path);
         DLOG("RPC failed on reading local content on file %s with error code %d", path, errno);
         close(fileDesc_local);
@@ -561,7 +583,7 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        free(buf_content);
+        delete (buf_content);
         DLOG("RPC failed on getting write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
@@ -575,7 +597,7 @@ int upload_file(void *userdata, const char *path) {
 
     // Create file should be handled by open and mknod
 
-    int rpc_ret = rpc_open(userdata, path, fi);
+    rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
         // not sure whicih Error Code referring to file not exit, so we assume thats the case
@@ -586,10 +608,10 @@ int upload_file(void *userdata, const char *path) {
         if (rpc_ret < 0) {
             unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
             fxn_ret = -errno;
-            free(statbuf_local);
-            free(buf_content);
+            delete (statbuf_local);
+            delete (buf_content);
             free(full_path);
-            free(fi);
+            delete (fi);
             DLOG("RPC failed on creating new file %s on server with error code %d", path, errno);
             close(fileDesc_local);
             return fxn_ret;
@@ -601,10 +623,10 @@ int upload_file(void *userdata, const char *path) {
         if (rpc_ret < 0) {
             unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
             fxn_ret = -errno;
-            free(statbuf_local);
-            free(buf_content);
+            delete (statbuf_local);
+            delete (buf_content);
             free(full_path);
-            free(fi);
+            delete (fi);
             DLOG("RPC failed on opening new file %s on server with error code %d", path, errno);
             close(fileDesc_local);
             return fxn_ret;
@@ -618,10 +640,10 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to truncate server file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(statbuf_local);
-        free(buf_content);
+        delete (statbuf_local);
+        delete (buf_content);
         free(full_path);
-        free(fi);
+        delete (fi);
         close(fileDesc_local);
         return fxn_ret;
     }
@@ -634,10 +656,10 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to write into file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(statbuf_local);
-        free(buf_content);
+        delete (statbuf_local);
+        delete (buf_content);
         free(full_path);
-        free(fi);
+        delete (fi);
         close(fileDesc_local);
         return fxn_ret;
     }
@@ -650,11 +672,11 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to getattr from remote file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(statbuf_local);
-        free(statbuf_remote);
-        free(buf_content);
+        delete (statbuf_local);
+        delete (statbuf_remote);
+        delete (buf_content);
         free(full_path);
-        free(fi);
+        delete (fi);
         close(fileDesc_local);
         return fxn_ret;
     }
@@ -667,9 +689,9 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to release file %s from server with error code %d", path, errno);
         fxn_ret = -errno;
-        free(fi);
-        free(statbuf_local);
-        free(buf_content);
+        delete (fi);
+        delete (statbuf_local);
+        delete (buf_content);
         free(full_path);
         close(fileDesc_local);
         return fxn_ret;
@@ -680,7 +702,7 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        free(statbuf_remote);
+        delete (statbuf_remote);
         DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
@@ -692,20 +714,20 @@ int upload_file(void *userdata, const char *path) {
     if (fxn_ret < 0) {
         DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        free(statbuf_remote);
-        free(statbuf_local);
-        free(buf_content);
+        delete (statbuf_remote);
+        delete (statbuf_local);
+        delete (buf_content);
         free(full_path);
-        free(fi);
+        delete (fi);
         close(fileDesc_local);
         return fxn_ret;
     }
 
-    free(statbuf_remote);
-    free(statbuf_local);
-    free(buf_content);
+    delete (statbuf_remote);
+    delete (statbuf_local);
+    delete (buf_content);
     free(full_path);
-    free(fi);
+    delete (fi);
     close(fileDesc_local);
 
     DLOG("upload_file on %s exit successfully", path);
@@ -792,7 +814,7 @@ void *watdfs_cli_init(struct fuse_conn_info *conn, const char *path_to_cache,
         *ret_code = -1;
         DLOG("Failed to initialize usetdata->cache_path");
 
-        free(userdata);
+        delete (userdata);
         return nullptr;
     }
 
@@ -866,8 +888,6 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
             // would be no updates on the server due to write exclusion and this prevents
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
-
-            void *userdata; // space holder
         }
 
         // now file must exists.
@@ -888,6 +908,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
     // ------------------------
     // will never reach here..
+    return fxn_ret;
 }
 
 // CREATE, OPEN AND CLOSE
@@ -979,7 +1000,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
         if (fxn_ret < 0) {
             DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
             fxn_ret = -errno;
-            free(statbuf_remote);
+            delete (statbuf_remote);
             free(full_path);
             close(fileDesc_local);
             return fxn_ret;
@@ -1272,8 +1293,6 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             // would be no updates on the server due to write exclusion and this prevents
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
-
-            void *userdata; // space holder
         }
 
         // file is fresh now (also possible if failed to download, don't know how to handle)
@@ -1285,6 +1304,7 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             return fxn_ret;
         }
     }
+    return fxn_ret;
 }
 
 int watdfs_cli_write(void *userdata, const char *path, const char *buf,
@@ -1396,8 +1416,6 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
             // would be no updates on the server due to write exclusion and this prevents
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
-
-            void *userdata; // space holder
         }
     }
 
