@@ -498,7 +498,7 @@ int upload_file(void *userdata, const char *path) {
     // --- Open local file for reading and writing ---
 
     // the file descriptor shall not share it with any other process in the system.
-    //int fileDesc_local = open(full_path, O_RDONLY);
+    // int fileDesc_local = open(full_path, O_RDONLY);
     int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
 
     // Upon successful completion, the function shall open the file and
@@ -540,7 +540,7 @@ int upload_file(void *userdata, const char *path) {
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to write the file to server. Maybe WRONLY will work
-    fi->flags   = O_RDWR;
+    fi->flags = O_RDWR;
 
     // Create file should be handled by open and mknod
     /*
@@ -1173,7 +1173,28 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
         // clear this entry
         ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
-        
+
+        return fxn_ret;
+    }
+}
+
+int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
+             off_t offset, struct fuse_file_info *fi) {
+    DLOG("watdfs_cli_read called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("watdfs_cli_release: File '%s' not opened", path);
+        return -ENOENT;
+
+    } else {
+
         return fxn_ret;
     }
 }
