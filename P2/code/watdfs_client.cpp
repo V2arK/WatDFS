@@ -278,7 +278,18 @@ int download_file(void *userdata, const char *path) {
     // The integer value that the actual function will return.
     int fxn_ret = 0;
 
-    // Firstly, we attempt to get the statbuf from the server.
+    // Firstly, we check if the file is opened locally
+    /*
+    struct Metadata *file_metadata = get_metadata_opened(str::string(path));
+
+    if (file_metadata != NULL) {
+        DLOG("Failed to download file %s, file already opened", path);
+        fxn_ret = -EMFILE;
+        return fxn_ret;
+    }
+    */
+
+    // Next, we attempt to get the statbuf from the server.
 
     // --- get file attributes from the server ---
     struct stat *statbuf_remote = new struct stat;
@@ -290,6 +301,50 @@ int download_file(void *userdata, const char *path) {
         DLOG("RPC failed on rpc_getattr file %s with error code %d", path, errno);
         return fxn_ret;
     }
+
+    // TODO: Add lock here, make sure file read is atomic.
+
+    // --- Read file from server ---
+    // firstly open file from server, we know it exists since we getattr.
+    struct fuse_file_info *fi = new struct fuse_file_info;
+    // we just want to read the file and download to client.
+    fi->flags = O_RDONLY;
+    rpc_ret   = rpc_open(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        DLOG("RPC failed on watdfs_cli_open while downloading file on file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // read file into
+    char *buf_content = new char[statbuf_remote->st_size];
+    rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
+
+    if (rpc_ret < 0) {
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        DLOG("RPC failed on watdfs_cli_read while reading content on file %s with error code %d", path, errno);
+        return fxn_ret;
+    }
+
+    // --- Release server file ---
+    rpc_ret = rpc_release(userdata, path, fi);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to release file %s from server with error code %d", path, errno);
+        fxn_ret = -errno;
+        free(fi);
+        free(statbuf_remote);
+        free(buf_content);
+        return fxn_ret;
+    }
+
+    // TODO: Unlock
 
     // Get the local file name, so we call our helper function which appends
     // the server_persist_dir to the given path.
@@ -331,40 +386,6 @@ int download_file(void *userdata, const char *path) {
             free(full_path);
             return fxn_ret;
         }
-    }
-
-    // TODO: Add lock here, make sure file read is atomic.
-
-    // --- Read file from server ---
-    // firstly open file from server, we know it exists since we getattr.
-    struct fuse_file_info *fi = new struct fuse_file_info;
-    // we just want to read the file and download to client.
-    fi->flags = O_RDONLY;
-    rpc_ret   = rpc_open(userdata, path, fi);
-
-    if (rpc_ret < 0) {
-        fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(full_path);
-        DLOG("RPC failed on watdfs_cli_open while downloading file on file %s with error code %d", path, errno);
-        close(fileDesc_local);
-        return fxn_ret;
-    }
-
-    // read file into
-    char *buf_content = new char[statbuf_remote->st_size];
-    rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
-
-    if (rpc_ret < 0) {
-        fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
-        free(full_path);
-        DLOG("RPC failed on watdfs_cli_read while reading content on file %s with error code %d", path, errno);
-        close(fileDesc_local);
-        return fxn_ret;
     }
 
     // --- truncate the file at the client to make sure its empty ---
@@ -411,21 +432,8 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // --- Release server file ---
-    rpc_ret = rpc_release(userdata, path, fi);
-
-    if (rpc_ret < 0) {
-        DLOG("Failed to release file %s from server with error code %d", path, errno);
-        fxn_ret = -errno;
-        free(fi);
-        free(statbuf_remote);
-        free(buf_content);
-        free(full_path);
-        close(fileDesc_local);
-        return fxn_ret;
-    }
-
-    // TODO: Unlock
+    // --- Close local file ---
+    close(fileDesc_local);
 
     // --- Update Tc ---
     time_t * Tc = get_Tc(userdata, path);
@@ -442,8 +450,6 @@ int download_file(void *userdata, const char *path) {
     free(statbuf_remote);
     free(buf_content);
     free(full_path);
-
-    close(fileDesc_local);
 
     DLOG("download_file on %s exit successfully", path);
 
@@ -501,6 +507,10 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
+
+    // --- Close local file, we done reading ---
+
+    close(fileDesc_local);
 
     // TODO: Lock
 
@@ -607,8 +617,6 @@ int upload_file(void *userdata, const char *path) {
     free(statbuf_local);
     free(buf_content);
     free(full_path);
-
-    close(fileDesc_local);
 
     DLOG("upload_file on %s exit successfully", path);
 
