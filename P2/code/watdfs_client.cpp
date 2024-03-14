@@ -18,7 +18,6 @@ struct Metadata {
     int    client_flag;
     int    fileDesc_client;
     int    fileHandle_server;
-    time_t Tc; // time the cache entry was last validated by the client
 };
 
 // global variables
@@ -26,6 +25,7 @@ struct Userdata {
     char  *cache_path;
     time_t cache_interval;
     // short path -> metadata
+    std::map<std::string, int> Tc;
     std::map<std::string, struct Metadata> files_opened;
 };
 
@@ -194,7 +194,7 @@ char *get_full_path(void *userdata, const char *short_path) {
 
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
-struct Metadata *get_metadata(void *userdata, const char *path) {
+struct Metadata *get_metadata_opened(void *userdata, const char *path) {
     auto it = ((Userdata *)userdata)->files_opened.find(std::string(path));
 
     if (it != ((Userdata *)userdata)->files_opened.end()) { // exists
@@ -203,13 +203,23 @@ struct Metadata *get_metadata(void *userdata, const char *path) {
         return NULL;
     }
 }
+
+// return NULL if file not exist in userdata (not opened)
+// otherwize return the Metadata.
+time_t * get_Tc(void *userdata, const char *path) {
+    auto it = ((Userdata *)userdata)->Tc.find(std::string(path));
+
+    if (it != ((Userdata *)userdata)->Tc.end()) { // exists
+        return &(it->second);
+    } else { // non exist
+        return NULL;
+    }
+}
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
-    struct Metadata *metadata = get_metadata(userdata, path);
-
+    time_t Tc = *get_Tc(userdata, path);
     time_t T  = time(NULL);
-    time_t Tc = metadata->Tc;
 
     if ((T - Tc) < ((Userdata *)userdata)->cache_interval) {
         // case (i)
@@ -253,10 +263,12 @@ bool is_fresh(void *userdata, const char *path) {
 
 // update the file given by 'path''s Tc to current time.
 void update_Tc(void *userdata, const char *path) {
-    struct Metadata *metadata = get_metadata(userdata, path);
+    time_t * Tc = get_Tc(userdata, path);
     // update the Tc to current time.
-    if (metadata != NULL) {
-        metadata->Tc = time(NULL);
+    if (Tc != NULL) {
+       *Tc = time(NULL);
+    } else {
+        DLOG("File %s not cached, cannot update Tc.", path)
     }
 }
 
@@ -414,6 +426,17 @@ int download_file(void *userdata, const char *path) {
     }
 
     // TODO: Unlock
+
+    // --- Update Tc ---
+    time_t * Tc = get_Tc(userdata, path);
+
+    if (Tc == NULL) {
+        // such file is not cached before, add to our list
+        ((struct Userdata *)userdata)->Tc[std::string(path)] = time(NULL);
+    } else {
+        // just update the Tc
+        *Tc = time(NULL);
+    }
 
     free(fi);
     free(statbuf_remote);
@@ -672,7 +695,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     // the server_persist_dir to the given path.
     char *full_path = get_full_path(userdata, path);
 
-    struct Metadata *metadata = get_metadata(userdata, path);
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
         // --- File not opened ---
@@ -893,7 +916,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
     // the server_persist_dir to the given path.
     char *full_path = get_full_path(userdata, path);
 
-    struct Metadata *metadata = get_metadata(userdata, path);
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
         // --- File not opened ---
@@ -940,13 +963,9 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             // we need to make sure the file is fresh in this case.
             if (!is_fresh(userdata, path)) {
                 fxn_ret = download_file(userdata, path);
-
                 if (fxn_ret < 0) {
                     DLOG("watdfs_cli_open failed to cache file '%s' info.", path);
                     // probably not that severe to exit?
-                } else {
-                    // we validated the cache entry as we just downloaded it
-                    update_Tc(userdata, path);
                 }
             }
         }
@@ -964,15 +983,19 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         
         // --- Create  Metadata ---
 
-        metadata = &((struct Userdata *)userdata)->files_opened[path];
+        metadata = ((struct Userdata *)userdata)->files_opened[std::string(path)];
 
         // --- Open local file ---
+
+        // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
+        // such that the file handle returned from this call respects the flag properties (e.g., read-only, write-only).
+        metadata->fileDesc_client = open(full_path, fi->flags);
 
         if (metadata->fileDesc_client == -1) {
             DLOG("Failed to open existing file %s with error code %d", path, errno);
             fxn_ret = -errno;
             // clear this entry
-            ((struct Userdata *)userdata)->files_opened.erase(path);
+            ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
             free(full_path);
             return fxn_ret;
         }
@@ -992,19 +1015,12 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             }
 
             // clear this entry
-            ((struct Userdata *)userdata)->files_opened.erase(path);
+            ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
             free(full_path);
             return fxn_ret;
         }
 
-        // --- Update metadata ---
-        // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
-        // such that the file handle returned from this call respects the flag properties (e.g., read-only, write-only).
-        ((struct Userdata *)userdata)->files_opened[path].fileDesc_client = open(full_path, fi->flags);
-        // update_tc() of mknod call will not able to change this metadata, as the file not opened, metadata not exist.
-        ((struct Userdata *)userdata)->files_opened[path].Tc = time(NULL);
-        // easier to insert
-        ((struct Userdata *)userdata)->files_opened[path].fileHandle_server = fi->fh;
+        metadata->fileHandle_server = fi->fh;
 
     } else {
         // --- File opened ---
@@ -1015,6 +1031,10 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // if the file has already been opened; if it has return -EMFILE.
         return -EMFILE;
     }
+
+    // IMPORTANT: We will leave fi->fh as the remote file handler.
+    free(full_path);
+    return fxn_ret;
 }
 
 int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *fi) {
