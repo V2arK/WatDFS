@@ -89,7 +89,6 @@ int lock(const char *path, rw_lock_mode_t mode) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -160,7 +159,6 @@ int unlock(const char *path, rw_lock_mode_t mode) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -311,7 +309,15 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // TODO: Add lock here, make sure file read is atomic.
+    // Lock
+    rpc_ret = lock(path, RW_READ_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        free(statbuf_remote);
+        DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
 
     // --- Read file from server ---
     // firstly open file from server, we know it exists since we getattr.
@@ -322,6 +328,8 @@ int download_file(void *userdata, const char *path) {
 
     // We just open READ ONLY, so it should not be causing any issue even if someone opened it for WRITE.
     if (rpc_ret < 0) {
+        unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
+
         fxn_ret = -errno;
         free(fi);
         free(statbuf_remote);
@@ -334,6 +342,8 @@ int download_file(void *userdata, const char *path) {
     rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
+
         fxn_ret = -errno;
         free(fi);
         free(statbuf_remote);
@@ -346,6 +356,8 @@ int download_file(void *userdata, const char *path) {
     rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
+
         DLOG("Failed to release file %s from server with error code %d", path, errno);
         fxn_ret = -errno;
         free(fi);
@@ -354,7 +366,15 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // TODO: Unlock
+    // Unlock
+    rpc_ret = unlock(path, RW_READ_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        free(statbuf_remote);
+        DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
 
     // Get the local file name, so we call our helper function which appends
     // the server_persist_dir to the given path.
@@ -464,11 +484,20 @@ int upload_file(void *userdata, const char *path) {
 
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
+    /*
     if (metadata == NULL) {
         // --- File not opened ---
         DLOG("Upload: failed to upload un-opened file local file %s ", path);
-        return -ENOENT; /* No such file or directory */
+        return -ENOENT; // No such file or directory
+    } else {
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
+            return -EMFILE; // Too many open files
+        }
     }
+    */
 
     // The integer value that the actual function will return.
     int fxn_ret = 0;
@@ -500,7 +529,7 @@ int upload_file(void *userdata, const char *path) {
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-
+    
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -509,6 +538,7 @@ int upload_file(void *userdata, const char *path) {
         DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
+    
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
@@ -525,19 +555,28 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Close local file, we done reading ---
-
     // close(fileDesc_local);
 
-    // TODO: Lock
+    // Lock
+    rpc_ret = lock(path, RW_WRITE_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        free(buf_content);
+        DLOG("RPC failed on getting write lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
 
     // --- open file on server ---
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
-    // we just want to write the file to server. Maybe WRONLY will work
+    // fill out fi
+    // fi->fh    = metadata->fileHandle_server;
     fi->flags = O_RDWR;
 
     // Create file should be handled by open and mknod
-    /*
+
+    
     int rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
@@ -547,6 +586,7 @@ int upload_file(void *userdata, const char *path) {
         rpc_ret = watdfs_cli_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
 
         if (rpc_ret < 0) {
+            unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
             fxn_ret = -errno;
             free(statbuf_local);
             free(buf_content);
@@ -561,6 +601,7 @@ int upload_file(void *userdata, const char *path) {
         rpc_ret = watdfs_cli_open(userdata, path, fi);
 
         if (rpc_ret < 0) {
+            unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
             fxn_ret = -errno;
             free(statbuf_local);
             free(buf_content);
@@ -571,12 +612,12 @@ int upload_file(void *userdata, const char *path) {
             return fxn_ret;
         }
     }
-    */
 
     // --- truncate the file at the server to make sure its empty ---
     rpc_ret = watdfs_cli_truncate(userdata, path, 0);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to truncate server file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
         free(statbuf_local);
@@ -592,6 +633,7 @@ int upload_file(void *userdata, const char *path) {
     rpc_ret = rpc_write(userdata, path, buf_content, statbuf_local->st_size, 0, fi);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to write into file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
         free(statbuf_local);
@@ -607,6 +649,7 @@ int upload_file(void *userdata, const char *path) {
     rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to getattr from remote file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
         free(statbuf_local);
@@ -619,11 +662,11 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Release server file ---
-
-    /*
+    
     rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to release file %s from server with error code %d", path, errno);
         fxn_ret = -errno;
         free(fi);
@@ -633,9 +676,16 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
-    */
 
-    // TODO: Unlock
+    // Unlock
+    rpc_ret = unlock(path, RW_WRITE_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        free(statbuf_remote);
+        DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
 
     // --- update the file metadata at the client to match server ---
     struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
@@ -1450,7 +1500,7 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
 
     if (metadata == NULL) {
         // --- File not opened ---
-        
+
         // download / update file if it's not fresh, fail if file not exist
         rpc_ret = update_file(userdata, path);
 
@@ -1577,7 +1627,6 @@ int rpc_getattr(void *userdata, const char *path, struct stat *statbuf) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -1654,7 +1703,6 @@ int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -1729,7 +1777,6 @@ int rpc_open(void *userdata, const char *path, struct fuse_file_info *fi) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -1803,7 +1850,6 @@ int rpc_release(void *userdata, const char *path, struct fuse_file_info *fi) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -1931,7 +1977,6 @@ int rpc_read(void *userdata, const char *path, char *buf, size_t size,
             // from the server is not 0, that is it may be -errno. Therefore, we
             // should set our function return value to the retcode from the server.
 
-            // TODO: set the function return value to the return code from the server.
             fxn_ret = retcode; // Set function return value to the server's return cod
         }
 
@@ -2086,7 +2131,6 @@ int rpc_write(void *userdata, const char *path, const char *buf,
             // from the server is not 0, that is it may be -errno. Therefore, we
             // should set our function return value to the retcode from the server.
 
-            // TODO: set the function return value to the return code from the server.
             fxn_ret = retcode; // Set function return value to the server's return cod
         }
 
@@ -2197,7 +2241,6 @@ int rpc_truncate(void *userdata, const char *path, off_t newsize) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -2271,7 +2314,6 @@ int rpc_fsync(void *userdata, const char *path, struct fuse_file_info *fi) {
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
@@ -2347,7 +2389,6 @@ int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2])
         // from the server is not 0, that is it may be -errno. Therefore, we
         // should set our function return value to the retcode from the server.
 
-        // TODO: set the function return value to the return code from the server.
         fxn_ret = retcode; // Set function return value to the server's return cod
     }
 
