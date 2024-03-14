@@ -1156,7 +1156,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
         // IMPORTANT: We left fi->fh as the remote file handler in watdfs_cli_open().
         rpc_ret = rpc_release(userdata, path, fi);
 
-        if (rpc_ret = 0) {
+        if (rpc_ret < 0) {
             fxn_ret = rpc_ret;
             DLOG("watdfs_cli_release: Server file '%s' close failed with errno %d", path, fxn_ret);
             return fxn_ret;
@@ -1165,7 +1165,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
         // --- Close Local File ---
         rpc_ret = close(metadata->fileDesc_client);
 
-        if (rpc_ret = 0) {
+        if (rpc_ret < 0) {
             fxn_ret = -errno;
             DLOG("watdfs_cli_release: File '%s' close failed with errno %d", path, fxn_ret);
             return fxn_ret;
@@ -1180,6 +1180,15 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
 int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
              off_t offset, struct fuse_file_info *fi) {
+    // Read size amount of data at offset of file into buf.
+
+    // This function reads into buf at most size bytes from the specified offset of the file.
+    // It should return the number of bytes requested to be read,
+    // except on EOF (return the number of bytes actually read) or error (return -errno).
+
+    // Remember that size may be greater than the maximum array size of the RPC
+    // library.
+
     DLOG("watdfs_cli_read called for '%s'", path);
 
     // The integer value watdfs_cli_getattr will return.
@@ -1190,12 +1199,40 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
 
     if (metadata == NULL) {
         // --- File not opened ---
-        DLOG("watdfs_cli_release: File '%s' not opened", path);
-        return -ENOENT;
-
+        DLOG("watdfs_cli_read: File '%s' not opened", path);
+        return -EPERM; /* operation not permitted */
     } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            if (!is_fresh(userdata, path)) {
+                // note download_file updates Tc.
+                fxn_ret = download_file(userdata, path);
 
-        return fxn_ret;
+                if (fxn_ret < 0) {
+                    DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
+                    // probably not that severe to exit?
+                }
+            }
+
+        } else {
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            void *userdata; // space holder
+        }
+
+        // file is fresh now (also possible if failed to download, don't know how to handle)
+        rpc_ret = pread(metadata->fileDesc_client, buf, size, offset);
+
+        if (rpc_ret < 0) {
+            fxn_ret = -errno;
+            DLOG("watdfs_cli_read: Failed to read cached file '%s' with errno %d", path, fxn_ret);
+            return fxn_ret;
+        }
     }
 }
 
