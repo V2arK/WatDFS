@@ -806,13 +806,15 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
         if (metadata->client_flag == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
+
             if (!is_fresh(userdata, path)) {
                 // note download_file updates Tc.
-                fxn_ret = download_file(userdata, path);
-
-                if (fxn_ret < 0) {
+                rpc_ret = download_file(userdata, path);
+                if (rpc_ret < 0) {
+                    // download cache fail
                     DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
-                    // probably not that severe to exit?
+                    fxn_ret = rpc_ret;
+                    return fxn_ret;
                 }
             }
 
@@ -1035,10 +1037,13 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         } else {
             // we need to make sure the file is fresh in this case.
             if (!is_fresh(userdata, path)) {
-                fxn_ret = download_file(userdata, path);
-                if (fxn_ret < 0) {
+                // note download_file updates Tc.
+                rpc_ret = download_file(userdata, path);
+                if (rpc_ret < 0) {
+                    // download cache fail
                     DLOG("watdfs_cli_open failed to cache file '%s' info.", path);
-                    // probably not that severe to exit?
+                    fxn_ret = rpc_ret;
+                    return fxn_ret;
                 }
             }
         }
@@ -1179,7 +1184,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 }
 
 int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
-             off_t offset, struct fuse_file_info *fi) {
+                    off_t offset, struct fuse_file_info *fi) {
     // Read size amount of data at offset of file into buf.
 
     // This function reads into buf at most size bytes from the specified offset of the file.
@@ -1208,11 +1213,12 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             if (!is_fresh(userdata, path)) {
                 // note download_file updates Tc.
-                fxn_ret = download_file(userdata, path);
-
-                if (fxn_ret < 0) {
+                rpc_ret = download_file(userdata, path);
+                if (rpc_ret < 0) {
+                    // download cache fail
                     DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
-                    // probably not that severe to exit?
+                    fxn_ret = rpc_ret;
+                    return fxn_ret;
                 }
             }
 
@@ -1234,6 +1240,68 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             return fxn_ret;
         }
     }
+}
+
+int watdfs_cli_write(void *userdata, const char *path, const char *buf,
+                     size_t size, off_t offset, struct fuse_file_info *fi) {
+    // Write size amount of data at offset of file from buf.
+
+    // This function writes size number of bytes from buf into the file at the specified offset.
+    // It should return the number of bytes requested to be written, except on error (-errno).
+
+    // Remember that size may be greater than the maximum array size of the RPC
+    // library.
+    DLOG("watdfs_cli_write called for '%s'", path);
+
+    // The integer value watdfs_cli_getattr will return.
+    int fxn_ret = 0;
+    int rpc_ret = 0;
+
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("watdfs_cli_write: File '%s' not opened", path);
+        return -EPERM; /* operation not permitted */
+    } else {
+        // --- File opened ---
+        if (metadata->client_flag == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
+            return -EMFILE; /* Too many open files */
+        } else {
+            // Read calls should not perform freshness checks, as there
+            // would be no updates on the server due to write exclusion and this prevents
+            // overwriting local file updates if freshness condition has expired.
+            // Write calls should perform the freshness checks at the end of writes, as usual.
+
+            rpc_ret = pwrite(metadata->fileDesc_client, buf, size, offset);
+
+            if (rpc_ret < 0) {
+                fxn_ret = -errno;
+                DLOG("watdfs_cli_write failed to write to cache file '%s', errno %d.", path, fxn_ret);
+                return fxn_ret;
+            }
+
+            // update Tc
+            update_Tc(userdata, path);
+
+            // freshness check
+            if (!is_fresh(userdata, path)) {
+                rpc_ret = upload_file(userdata, path);
+
+                if (rpc_ret < 0) {
+                    // Upload failed.
+                    DLOG("watdfs_cli_write failed to upload cache file '%s' info.", path);
+                    fxn_ret = rpc_ret;
+                    return fxn_ret;
+                }
+            }
+        }
+    }
+    // Return, we are done
+    return fxn_ret;
 }
 
 // -------------------- P1 RPC functions --------------------
