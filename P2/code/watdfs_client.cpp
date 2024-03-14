@@ -25,7 +25,7 @@ struct Userdata {
     char  *cache_path;
     time_t cache_interval;
     // short path -> metadata
-    std::map<std::string, int> Tc;
+    std::map<std::string, time_t> Tc;
     std::map<std::string, struct Metadata> files_opened;
 };
 
@@ -218,10 +218,15 @@ time_t * get_Tc(void *userdata, const char *path) {
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
-    time_t Tc = *get_Tc(userdata, path);
+    time_t * Tc = get_Tc(userdata, path);
     time_t T  = time(NULL);
 
-    if ((T - Tc) < ((struct Userdata *)userdata)->cache_interval) {
+    if (Tc == NULL) {
+        // file is not cached, we just assume its not fresh.
+        return false;
+    }
+
+    if ((T - *Tc) < ((struct Userdata *)userdata)->cache_interval) {
         // case (i)
         return true;
     }
@@ -268,7 +273,9 @@ void update_Tc(void *userdata, const char *path) {
     if (Tc != NULL) {
        *Tc = time(NULL);
     } else {
-        DLOG("File %s not cached, cannot update Tc.", path)
+        DLOG("File %s not cached, will add new entry on Tc.", path);
+        // such file is not cached before, add to our list
+        ((struct Userdata *)userdata)->Tc[std::string(path)] = time(NULL);
     }
 }
 
@@ -778,15 +785,13 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             if (!is_fresh(userdata, path)) {
+                // note download_file updates Tc.
                 fxn_ret = download_file(userdata, path);
 
                 if (fxn_ret < 0) {
                     DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
                     // probably not that severe to exit?
-                } else {
-                    // we validated the cache entry as we just downloaded it
-                    update_Tc(userdata, path);
-                }
+                } 
             }
 
             // file is fresh now (also possible if failed to download, don't know how to handle)
@@ -831,7 +836,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     // the server_persist_dir to the given path.
     char *full_path = get_full_path(userdata, path);
 
-    struct Metadata *metadata = get_metadata(userdata, path);
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
         // --- File not opened ---
@@ -945,7 +950,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         if (rpc_ret < 0) {
             if (rpc_ret != -ENOENT) { 
                 /* Not sure whats happened */
-                DLOG("watdfs_cli_open: Failed to open file %s, with errno %d", path, rpc_ret);
+                DLOG("watdfs_cli_open: Failed to getattr on remote file %s, with errno %d", path, rpc_ret);
                 fxn_ret = -rpc_ret;
                 free(full_path);
                 return fxn_ret;
@@ -961,12 +966,17 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
                 return -ENOENT;
             }
 
-            DLOG("watdfs_cli_open: file %s not exist, creating", path);
-
-            // If an application calls open with the O_CREAT flag and the file does not exist,
+            // from P1:
+            // If an application calls open with the O_CREAT flag and the file does not exist (how? by getattr?),
             // watdfs_cli_mknod is called by FUSE before the actual watdfs_cli_open call.
             // So we don't need to mknod, and watdfs_cli_mknod handles create file then upload.
             // so we should be able to just open directly, and this case it should be fresh as well.
+
+            // TODO: Guess we just return?
+            DLOG("watdfs_cli_open: file %s not exist, but with O_CREAT", path);
+            free(full_path);
+            return -ENOENT;
+
         } else {
             // we need to make sure the file is fresh in this case.
             if (!is_fresh(userdata, path)) {
@@ -991,7 +1001,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         
         // --- Create  Metadata ---
 
-        metadata = ((struct Userdata *)userdata)->files_opened[std::string(path)];
+        metadata = &((struct Userdata *)userdata)->files_opened[std::string(path)];
 
         // --- Open local file ---
 
@@ -1028,6 +1038,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             return fxn_ret;
         }
 
+        // save file handler
         metadata->fileHandle_server = fi->fh;
 
     } else {
@@ -1058,7 +1069,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
     // the server_persist_dir to the given path.
     char *full_path = get_full_path(userdata, path);
 
-    struct Metadata *metadata = get_metadata(userdata, path);
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
         // --- File not opened ---
