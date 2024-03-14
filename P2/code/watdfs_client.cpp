@@ -15,9 +15,9 @@ INIT_LOG
 #include <map>
 
 struct Metadata {
-    int    client_flag;
-    int    fileDesc_client;
-    int    fileHandle_server;
+    int client_flag;
+    int fileDesc_client;
+    int fileHandle_server;
 };
 
 // global variables
@@ -25,7 +25,7 @@ struct Userdata {
     char  *cache_path;
     time_t cache_interval;
     // short path -> metadata
-    std::map<std::string, time_t> Tc;
+    std::map<std::string, time_t>          Tc;
     std::map<std::string, struct Metadata> files_opened;
 };
 
@@ -206,7 +206,7 @@ struct Metadata *get_metadata_opened(void *userdata, const char *path) {
 
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
-time_t * get_Tc(void *userdata, const char *path) {
+time_t *get_Tc(void *userdata, const char *path) {
     auto it = ((struct Userdata *)userdata)->Tc.find(std::string(path));
 
     if (it != ((struct Userdata *)userdata)->Tc.end()) { // exists
@@ -218,8 +218,8 @@ time_t * get_Tc(void *userdata, const char *path) {
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
-    time_t * Tc = get_Tc(userdata, path);
-    time_t T  = time(NULL);
+    time_t *Tc = get_Tc(userdata, path);
+    time_t  T  = time(NULL);
 
     if (Tc == NULL) {
         // file is not cached, we just assume its not fresh.
@@ -268,10 +268,10 @@ bool is_fresh(void *userdata, const char *path) {
 
 // update the file given by 'path''s Tc to current time.
 void update_Tc(void *userdata, const char *path) {
-    time_t * Tc = get_Tc(userdata, path);
+    time_t *Tc = get_Tc(userdata, path);
     // update the Tc to current time.
     if (Tc != NULL) {
-       *Tc = time(NULL);
+        *Tc = time(NULL);
     } else {
         DLOG("File %s not cached, will add new entry on Tc.", path);
         // such file is not cached before, add to our list
@@ -443,7 +443,7 @@ int download_file(void *userdata, const char *path) {
     close(fileDesc_local);
 
     // --- Update Tc ---
-    time_t * Tc = get_Tc(userdata, path);
+    time_t *Tc = get_Tc(userdata, path);
 
     if (Tc == NULL) {
         // such file is not cached before, add to our list
@@ -463,11 +463,21 @@ int download_file(void *userdata, const char *path) {
     return fxn_ret;
 }
 
+// we need the file already opened before we can upload.
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("Upload: failed to upload un-opened file local file %s ", path);
+        return -ENOENT; /* No such file or directory */
+    }
+
     // The integer value that the actual function will return.
     int fxn_ret = 0;
+    int rpc_ret = 0;
     // --- get file attributes from the client ---
 
     // Get the local file name, so we call our helper function which appends
@@ -485,13 +495,16 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Open local file for reading and writing ---
+
     // the file descriptor shall not share it with any other process in the system.
-    int fileDesc_local = open(full_path, O_RDONLY);
+    //int fileDesc_local = open(full_path, O_RDONLY);
+    int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
 
     // Upon successful completion, the function shall open the file and
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
+    /*
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -500,6 +513,7 @@ int upload_file(void *userdata, const char *path) {
         DLOG("RPC failed on open local file %s with error code %d", path, errno);
         return fxn_ret;
     }
+    */
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
@@ -517,7 +531,7 @@ int upload_file(void *userdata, const char *path) {
 
     // --- Close local file, we done reading ---
 
-    close(fileDesc_local);
+    // close(fileDesc_local);
 
     // TODO: Lock
 
@@ -526,6 +540,9 @@ int upload_file(void *userdata, const char *path) {
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to write the file to server. Maybe WRONLY will work
     fi->flags   = O_RDWR;
+
+    // Create file should be handled by open and mknod
+    /*
     int rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
@@ -559,6 +576,7 @@ int upload_file(void *userdata, const char *path) {
             return fxn_ret;
         }
     }
+    */
 
     // --- truncate the file at the server to make sure its empty ---
     rpc_ret = watdfs_cli_truncate(userdata, path, 0);
@@ -605,6 +623,8 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Release server file ---
+
+    /*
     rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
@@ -617,7 +637,8 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
-
+    */
+   
     // TODO: Unlock
 
     free(fi);
@@ -715,8 +736,8 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
     if (metadata == NULL) {
         // --- File not opened ---
 
-        // You should try to open and transfer the file from the server, 
-        // perform the operation locally, transfer the file back to the server 
+        // You should try to open and transfer the file from the server,
+        // perform the operation locally, transfer the file back to the server
         // (for write calls), and close the file.
 
         // so we don't check if local cache exists?
@@ -791,7 +812,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
                 if (fxn_ret < 0) {
                     DLOG("watdfs_cli_getattr failed to cache file '%s' info.", path);
                     // probably not that severe to exit?
-                } 
+                }
             }
 
             // file is fresh now (also possible if failed to download, don't know how to handle)
@@ -843,7 +864,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // check if file exists on server
         struct stat *statbuf_remote = new struct stat;
-        rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+        rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
         if (rpc_ret >= 0) {
             // we successfully get the file,  meaning we should not be able to mknod.
@@ -857,7 +878,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // so we remove the local cached file (if it exists)
         rpc_ret = unlink(full_path);
-        
+
         if (rpc_ret < 0) {
             DLOG("watdfs_cli_mknod warning: Failed to remove cached file %s with error code %d", path, errno);
             // we don't really care if we removed it or not, because the file may not exists
@@ -934,13 +955,13 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
     if (metadata == NULL) {
         // --- File not opened ---
 
-        // the server should keep track of open files. The server should maintain a 
-        // thread synchronized data structure that maps filenames to their status 
-        // (open for write, open for read, etc.). 
-        // If the server receives an open request for write to a file that has already 
-        // been opened in write mode,the server will use this data structure to discover 
-        // the conflict a nd return - EACCES. 
-        // When the server receives a message to close a file it has opened in write mode, 
+        // the server should keep track of open files. The server should maintain a
+        // thread synchronized data structure that maps filenames to their status
+        // (open for write, open for read, etc.).
+        // If the server receives an open request for write to a file that has already
+        // been opened in write mode,the server will use this data structure to discover
+        // the conflict a nd return - EACCES.
+        // When the server receives a message to close a file it has opened in write mode,
         // the data structure should be modified to indicate that the file is now available to a writer.
 
         // get file stat from server
@@ -948,7 +969,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
         if (rpc_ret < 0) {
-            if (rpc_ret != -ENOENT) { 
+            if (rpc_ret != -ENOENT) {
                 /* Not sure whats happened */
                 DLOG("watdfs_cli_open: Failed to getattr on remote file %s, with errno %d", path, rpc_ret);
                 fxn_ret = -rpc_ret;
@@ -998,7 +1019,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // and the server as part of caching the file locally, resulting in two different file descriptors
         // which you should track at the client. As part of these open calls,
         // you should satisfy the mutual exclusion requirements (suggestions in Section 7.2.3).
-        
+
         // --- Create  Metadata ---
 
         metadata = &((struct Userdata *)userdata)->files_opened[std::string(path)];
@@ -1046,7 +1067,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // we cannot open an opened file..
         DLOG("watdfs_cli_open: Failed to open already opend file '%s'", path);
         free(full_path);
-        // You should use your already tracked metadata to determine 
+        // You should use your already tracked metadata to determine
         // if the file has already been opened; if it has return -EMFILE.
         return -EMFILE;
     }
@@ -1057,9 +1078,17 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
 }
 
 int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *fi) {
-    // Called during open.
-    // You should fill in fi->fh.
-    DLOG("watdfs_cli_open called for '%s'", path);
+    // Called during close.
+
+    // libfuse will call watdfs_cli_release, but will not wait for watdfs_cli_release to return
+    //  before close returns.
+
+    // subsequent open/close calls to the same file may not succeed because watdfs_cli_release
+    // has not completed.
+
+    // we require that if release has not yet completed on the same file, open should fail with EMFILE.
+
+    DLOG("watdfs_cli_release called for '%s'", path);
 
     // The integer value watdfs_cli_getattr will return.
     int fxn_ret = 0;
@@ -1073,22 +1102,50 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
     if (metadata == NULL) {
         // --- File not opened ---
+        free(full_path);
+        DLOG("watdfs_cli_release: File '%s' not opened", path);
+        return -ENOENT;
 
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
-            // Only read calls are allowed and should
-            // perform freshness checks before reads, as usual.
-            // Write calls should fail and return -EMFILE.
 
-        } else { // WRITE mode
-            // Read calls should not perform freshness checks, as there
-            // would be no updates on the server due to write exclusion and this prevents
-            // overwriting local file updates if freshness condition has expired.
-            // Write calls should perform the freshness checks at the end of writes, as usual.
+        if (fi->flags != O_RDONLY) {
+            // watdfs_cli_release is responsible for transferring a writable file from the client to
+            // server and unlocking it.
 
-            void *userdata; // space holder
+            rpc_ret = upload_file(userdata, path);
+
+            if (rpc_ret < 0) {
+                free(full_path);
+                fxn_ret = rpc_ret;
+                DLOG("watdfs_cli_release: Failed to upload file '%s' with errno %d before close", path, fxn_ret);
+                return fxn_ret;
+            }
         }
+
+        // --- Close Server File ---
+
+        rpc_ret = rpc_release(userdata, path, fi);
+
+        if (rpc_ret = 0) {
+            free(full_path);
+            fxn_ret = rpc_ret;
+            DLOG("watdfs_cli_release: Server file '%s' close failed with errno %d", path, fxn_ret);
+            return fxn_ret;
+        }
+
+        // --- Close Local File ---
+        rpc_ret = close(metadata->fileDesc_client);
+
+        if (rpc_ret = 0) {
+            free(full_path);
+            fxn_ret = -errno;
+            DLOG("watdfs_cli_release: File '%s' close failed with errno %d", path, fxn_ret);
+            return fxn_ret;
+        }
+
+        // clear this entry
+        ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
     }
 }
 
