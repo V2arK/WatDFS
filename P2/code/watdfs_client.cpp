@@ -1196,8 +1196,9 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
             return fxn_ret;
         }
 
+        // On watdfs_cli_release, the client copy of the file should be closed(close system call), but it should remain in the cache directory.The cached copy of the file should not be deleted.
         // clear this entry
-        ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
+        // ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
 
         return fxn_ret;
     }
@@ -1396,8 +1397,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
     return fxn_ret;
 }
 
-int watdfs_cli_fsync(void *userdata, const char *path,
-                     struct fuse_file_info *fi) {
+int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Force a flush of file data.
     DLOG("watdfs_cli_fsync called for '%s'", path);
 
@@ -1442,9 +1442,12 @@ int watdfs_cli_fsync(void *userdata, const char *path,
             update_Tc(userdata, path);
         }
     }
-
     // Return, we are done
     return fxn_ret;
+}
+
+// CHANGE METADATA
+int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2]) {
 }
 
 // -------------------- P1 RPC functions --------------------
@@ -2155,8 +2158,7 @@ int rpc_truncate(void *userdata, const char *path, off_t newsize) {
     return 0;
 }
 
-int rpc_fsync(void *userdata, const char *path,
-              struct fuse_file_info *fi) {
+int rpc_fsync(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Force a flush of file data.
     DLOG("rpc_fsync called for '%s'", path);
 
@@ -2228,8 +2230,7 @@ int rpc_fsync(void *userdata, const char *path,
 }
 
 // CHANGE METADATA
-int rpc_utimensat(void *userdata, const char *path,
-                  const struct timespec ts[2]) {
+int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2]) {
     // Change file access and modification times.
     DLOG("rpc_open called for '%s'", path);
 
