@@ -634,7 +634,7 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // --- update the file metadata at the client to match server ---
+    // --- update the file metadata at the server to match client ---
     struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
     rpc_ret               = rpc_utimensat(userdata, path, ts);
 
@@ -1049,6 +1049,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
 
         if (rpc_ret < 0) {
             fxn_ret = rpc_ret;
+            free(full_path);
             DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
             return fxn_ret;
         }
@@ -1071,32 +1072,35 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         int fileDesc_local = open(full_path, fi->flags);
 
         if (fileDesc_local == -1) {
-            DLOG("Failed to open existing file %s with error code %d", path, errno);
+            DLOG("watdfs_cli_open: Failed to open existing local file %s with error code %d", path, errno);
             fxn_ret = -errno;
             // clear this entry
             //((struct Userdata *)userdata)->files_opened.erase(std::string(path));
             free(full_path);
             return fxn_ret;
         }
+        DLOG("watdfs_cli_open: local file %s opened", path);
         // --- Open remote file ---
 
         rpc_ret = rpc_open(userdata, path, fi);
 
         if (rpc_ret < 0) {
-            DLOG("Failed to open existing file %s with error code %d", path, rpc_ret);
+            DLOG("watdfs_cli_open: Failed to open existing remote file %s with error code %d", path, rpc_ret);
             fxn_ret = rpc_ret;
 
             // close local opened file
-            rpc_ret = close(metadata->fileDesc_client);
+            rpc_ret = close(fileDesc_local);
             if (rpc_ret < 0) {
-                DLOG("Failed to close local opened cached file %s with error code %d", path, rpc_ret);
+                DLOG("watdfs_cli_open: Failed to close local opened cached file %s with error code %d", path, rpc_ret);
             }
 
             // clear this entry
-            ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
+            //((struct Userdata *)userdata)->files_opened.erase(std::string(path));
             free(full_path);
             return fxn_ret;
         }
+
+        DLOG("watdfs_cli_open: remote file %s opened", path);
 
         // --- Create  Metadata ---
         ((struct Userdata *)userdata)->files_opened.insert(std::make_pair(std::string(path), Metadata{fi->flags, fileDesc_local, fi->fh}));
