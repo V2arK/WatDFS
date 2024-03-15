@@ -755,6 +755,7 @@ int update_file(void *userdata, const char *path) {
     // The integer value function will return.
     int fxn_ret = 0;
     int rpc_ret = 0;
+    DLOG("update_file called on '%s'", path);
 
     // You should try to open and transfer the file from the server,
     // perform the operation locally, transfer the file back to the server
@@ -1207,6 +1208,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             return -ENOENT;
         }
 
+        DLOG("watdfs_cli_open: updating file %s", path);
         // download / update file if it's not fresh, fail if file not exist
         rpc_ret = update_file(userdata, path);
 
@@ -1230,7 +1232,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // --- Create  Metadata ---
 
         metadata = &((struct Userdata *)userdata)->files_opened[std::string(path)];
-
+        metadata->client_flag = fi->flags;
         // --- Open local file ---
 
         // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
