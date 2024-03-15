@@ -487,7 +487,7 @@ int download_file(void *userdata, const char *path) {
     }
 
     // --- update the file metadata at the client to match server ---
-    struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
+    struct timespec ts[2] = {statbuf_remote->st_mtim, statbuf_remote->st_mtim};
     fxn_ret               = futimens(fileDesc_local, ts);
 
     if (fxn_ret < 0) {
@@ -649,7 +649,7 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- update the file metadata at the client to match server ---
-    struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
+    struct timespec ts[2] = {statbuf_local->st_mtim, statbuf_local->st_mtim};
     rpc_ret               = rpc_utimensat(userdata, path, ts);
 
     if (rpc_ret < 0) {
