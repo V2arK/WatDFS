@@ -151,7 +151,7 @@ int watdfs_mknod(int *argTypes, void **args) {
     // Clean up the full path, it was allocated on the heap.
     free(full_path);
 
-    DLOG("Returning code for getattr: %d", *ret);
+    DLOG("Returning code for mknod: %d", *ret);
     // The RPC call succeeded, so return 0.
     return 0;
 }

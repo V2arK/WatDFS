@@ -1760,7 +1760,7 @@ int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     // The integer value watdfs_cli_getattr will return.
     int fxn_ret = 0;
     if (rpc_ret < 0) {
-        DLOG("mknod rpc failed with error '%d'", rpc_ret);
+        DLOG("rpc_mknod failed with error '%d'", rpc_ret);
         // Something went wrong with the rpcCall, return a sensible return
         // value. In this case lets return, -EINVAL
         fxn_ret = -EINVAL;
@@ -1773,7 +1773,7 @@ int rpc_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     }
 
     if (fxn_ret < 0) {
-        DLOG("mknod failed with code: %d", fxn_ret);
+        DLOG("rpc_mknod failed with code: %d", fxn_ret);
     }
 
     // Clean up the memory we have allocated.
