@@ -654,8 +654,8 @@ int upload_file(void *userdata, const char *path) {
     }
     */
 
-    // --- truncate the file at the server to make sure its empty ---
-    rpc_ret = rpc_truncate(userdata, path, 0);
+    // --- truncate the file at the server to make sure its at the right size ---
+    rpc_ret = rpc_truncate(userdata, path, statbuf_local->st_size);
 
     if (rpc_ret < 0) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
@@ -758,7 +758,7 @@ int upload_file(void *userdata, const char *path) {
     delete (buf_content);
     free(full_path);
     delete (fi);
-    close(fileDesc_local);
+    // close(fileDesc_local);
 
     DLOG("upload_file on %s exit successfully", path);
 
@@ -798,6 +798,8 @@ int update_file(void *userdata, const char *path) {
             // exit
             return rpc_ret;
         }
+    } else {
+        DLOG("update_file: file '%s' up to date already", path);
     }
 
     // is fresh, just return
@@ -988,62 +990,6 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     // the server_persist_dir to the given path.
     char *full_path = get_full_path(userdata, path);
 
-    time_t *tc = get_tc(userdata, path);
-
-    if (tc == NULL) {
-        // file never cached
-
-        // check if file exists on server
-        struct stat *statbuf_remote = new struct stat;
-        rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
-
-        if (rpc_ret >= 0) {
-            // we successfully get the file,  meaning we should not be able to mknod.
-            DLOG("watdfs_cli_mknod: File %s already exist", path);
-            fxn_ret = -EEXIST; // File Exist
-            free(full_path);
-            delete (statbuf_remote);
-            return fxn_ret;
-        }
-
-        // We couldn't get statbuf for remote file, meaning such file not exist (is not ?)
-
-        // so we remove the local cached file (if it exists)
-        rpc_ret = unlink(full_path);
-
-        if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod warning: Failed to remove cached file %s with error code %d", path, errno);
-            // we don't really care if we removed it or not, because the file may not exists
-        }
-
-        // create the file on the server as well
-        rpc_ret = rpc_mknod(userdata, path, mode, dev);
-
-        if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to mknod on server %s with error code %d", path, rpc_ret);
-            fxn_ret = rpc_ret;
-            free(full_path);
-            return fxn_ret;
-        }
-
-        rpc_ret = download_file(userdata, path);
-        if (rpc_ret < 0) {
-            // download cache fail
-            DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
-            fxn_ret = rpc_ret;
-            return fxn_ret;
-        }
-        return fxn_ret;
-    }
-
-    // now the file are cached locally, meaning file must exist on server
-
-    DLOG("watdfs_cli_mknod: cannot mknod exising file %s", path);
-    fxn_ret = -EEXIST; // File Exist
-    free(full_path);
-    return fxn_ret;
-
-    /*
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
@@ -1073,13 +1019,12 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // TODO: Need to remote Tc?
 
-        // now we create the local file
-        rpc_ret = mknod(full_path, mode, dev);
+        // now we create the remote file
+        rpc_ret = rpc_mknod(userdata, path, mode, dev);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to mknod %s with error code %d", path, errno);
-            fxn_ret = -errno;
-
+            DLOG("watdfs_cli_mknod: Failed to mknod on server %s with error code %d", path, rpc_ret);
+            fxn_ret = rpc_ret;
             free(full_path);
             return fxn_ret;
         }
@@ -1094,42 +1039,16 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
             return fxn_ret;
         }
 
-        // get server creation time
-        rpc_ret = rpc_getattr(userdata, path, statbuf_remote);
+        // just download it
+        rpc_ret = download_file(userdata, path);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to geattr on remote file %s with errno %d", path, rpc_ret);
+            // download cache fail
+                DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
             fxn_ret = rpc_ret;
-            free(full_path);
             return fxn_ret;
         }
-
-        // set times same as the remote on local
-        int fileDesc_local = open(full_path, O_WRONLY);
-
-        if (fileDesc_local == -1) {
-            DLOG("Failed to open existing file %s with error code %d", path, errno);
-            fxn_ret = -errno;
-            free(full_path);
-            return fxn_ret;
-        }
-
-        struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
-        fxn_ret               = futimens(fileDesc_local, ts);
-
-        if (fxn_ret < 0) {
-            DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
-            fxn_ret = -errno;
-            delete (statbuf_remote);
-            free(full_path);
-            close(fileDesc_local);
-            return fxn_ret;
-        }
-
-        // update Tc
-        update_Tc(userdata, path);
-
-        close(fileDesc_local);
+        
         return fxn_ret;
 
     } else {
@@ -1143,7 +1062,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     free(full_path);
     // return final results, should be 0
     return fxn_ret;
-    */
+    
 }
 
 int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi) {
@@ -1475,6 +1394,8 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                 return fxn_ret;
             }
 
+            DLOG("watdfs_cli_write succeed to write to cache file '%s'", path);
+
             // update Tc
             update_Tc(userdata, path);
 
@@ -1491,6 +1412,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
             }
         }
     }
+    DLOG("watdfs_cli_write: finished on file %s", path);
     // Return, we are done
     return fxn_ret;
 }
