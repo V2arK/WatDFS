@@ -1360,8 +1360,8 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
 
         // On watdfs_cli_release, the client copy of the file should be closed(close system call), but it should remain in the cache directory.The cached copy of the file should not be deleted.
         // clear this entry
-        // ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
-
+        ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
+        DLOG("watdfs_cli_release: File '%s' closed, removed entry in userdata", path);
         return fxn_ret;
     }
 }
