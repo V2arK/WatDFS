@@ -487,7 +487,7 @@ int download_file(void *userdata, const char *path) {
     }
 
     // --- update the file metadata at the client to match server ---
-    struct timespec ts[2] = {statbuf_remote->st_mtim, statbuf_remote->st_mtim};
+    struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
     fxn_ret               = futimens(fileDesc_local, ts);
 
     if (fxn_ret < 0) {
@@ -909,22 +909,22 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // TODO: Need to remote Tc?
 
-        // create the file on the client
-        rpc_ret = mknod(full_path, mode, dev);
+        // create the file on the server
+        rpc_ret = rpc_mknod(userdata, path, mode, dev);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to mknod cache %s with error code %d", path, rpc_ret);
+            DLOG("watdfs_cli_mknod: Failed to mknod remote file %s with error code %d", path, rpc_ret);
             fxn_ret = rpc_ret;
             free(full_path);
             return fxn_ret;
         }
 
-        // just upload it
-        rpc_ret = upload_file(userdata, path);
+        // just download it
+        rpc_ret = download_file(userdata, path);
 
         if (rpc_ret < 0) {
             // download cache fail
-            DLOG("watdfs_cli_read failed to upload cache file '%s' info.", path);
+            DLOG("watdfs_cli_read failed to download cache file '%s' info.", path);
             fxn_ret = rpc_ret;
             return fxn_ret;
         }
