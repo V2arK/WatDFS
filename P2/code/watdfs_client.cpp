@@ -612,7 +612,7 @@ int upload_file(void *userdata, const char *path) {
     struct fuse_file_info *fi = new struct fuse_file_info;
     // fill out fi
     fi->fh    = metadata->fileHandle_server;
-    //fi->flags = O_RDWR;
+    fi->flags = metadata->client_flag;
 
     // Create file should be handled by open and mknod
 
@@ -675,8 +675,8 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-        DLOG("Failed to write into file %s with error code %d", full_path, errno);
-        fxn_ret = -errno;
+        DLOG("upload: Failed to write into remote file %s with error code %d", path, rpc_ret);
+        fxn_ret = rpc_ret;
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
@@ -954,27 +954,23 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
                 // overwriting local file updates if freshness condition has expired.
                 // Write calls should perform the freshness checks at the end of writes, as usual.
             }
-
-            // now file must exists.
-
-            // fill statbuf
-            rpc_ret = stat(full_path, statbuf);
-
-            free(full_path);
-
-            if (rpc_ret < 0) {
-                DLOG("Failed to read stat from %s with error code %d", path, errno);
-                fxn_ret = -errno;
-                return fxn_ret;
-            }
-
-            return rpc_ret;
         }
     }
 
-    // ------------------------
-    // will never reach here..
-    return fxn_ret;
+    // now file must exists.
+
+    // fill statbuf
+    rpc_ret = stat(full_path, statbuf);
+
+    free(full_path);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to read stat from %s with error code %d", path, errno);
+        fxn_ret = -errno;
+        return fxn_ret;
+    }
+
+    return rpc_ret;
 }
 
 // CREATE, OPEN AND CLOSE
@@ -1120,7 +1116,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
                 DLOG("watdfs_cli_open: Failed to open file %s, file not exist", path);
                 free(full_path);
                 return -ENOENT;
-            }
+            } 
 
             // from P1:
             // If an application calls open with the O_CREAT flag and the file does not exist (how? by getattr?),

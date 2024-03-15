@@ -330,7 +330,7 @@ int watdfs_write(int *argTypes, void **args) {
     // (void)statbuf;
 
     // Let sys_ret be the return code from the read system call.
-    DLOG("Read size %ld, offset %ld", *size, *offset);
+    DLOG("write size %ld, offset %ld", *size, *offset);
     int sys_ret = pwrite(fi->fh, buf, *size, *offset);
 
     if (sys_ret < 0) {
@@ -339,11 +339,11 @@ int watdfs_write(int *argTypes, void **args) {
         // If there is an error on the system call, then the return code should
         // be -errno.
         *ret = -errno;
-        DLOG("Returning error code for read: %d", *ret);
+        DLOG("Returning error code for write: %d", *ret);
     } else {
         // Open FILE and return a new file descriptor for it, or -1 on error.
         *ret = sys_ret;
-        DLOG("Read file succeed with %d byte read.", *ret);
+        DLOG("write file succeed with %d byte read.", *ret);
     }
 
     // Clean up the full path, it was allocated on the heap.
