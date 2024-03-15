@@ -1019,16 +1019,6 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // TODO: Need to remote Tc?
 
-        // now we create the remote file
-        rpc_ret = rpc_mknod(userdata, path, mode, dev);
-
-        if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to mknod on server %s with error code %d", path, rpc_ret);
-            fxn_ret = rpc_ret;
-            free(full_path);
-            return fxn_ret;
-        }
-
         // create the file on the server as well
         rpc_ret = rpc_mknod(userdata, path, mode, dev);
 
