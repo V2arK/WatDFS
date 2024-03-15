@@ -1330,6 +1330,9 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             fxn_ret = -errno;
             DLOG("watdfs_cli_read: Failed to read cached file '%s' with errno %d", path, fxn_ret);
             return fxn_ret;
+        } else {
+            fxn_ret = rpc_ret;
+            // update how many byte written
         }
     }
     return fxn_ret;
