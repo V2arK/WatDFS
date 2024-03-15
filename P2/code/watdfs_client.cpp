@@ -255,6 +255,16 @@ time_t *get_Tc(void *userdata, const char *path) {
     }
 }
 
+int get_flags(void *userdata, const char *path) {
+    int                  flags  = -1;
+    auto                 it     = ((struct Userdata *)userdata)->files_opened.find(std::string(path));
+    if (it != ((struct Userdata *)userdata)->files_opened.end()) { // exists
+        flags = it->second.client_flag & O_ACCMODE;
+    }
+
+    return flags;
+}
+
 // check if the file at given path is fresh.
 // ASSUME file is opened.
 bool is_fresh(void *userdata, const char *path) {
@@ -364,7 +374,6 @@ int download_file(void *userdata, const char *path) {
     // firstly open file from server, we know it exists since we getattr.
     struct fuse_file_info *fi = new struct fuse_file_info;
     // we just want to read the file and download to client.
-    fi->flags = O_RDONLY;
     rpc_ret   = rpc_open(userdata, path, fi);
 
     // We just open READ ONLY, so it should not be causing any issue even if someone opened it for WRITE.
@@ -531,7 +540,7 @@ int upload_file(void *userdata, const char *path) {
         DLOG("Upload: failed to upload un-opened file local file %s ", path);
         return -ENOENT; // No such file or directory
     } else {
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
@@ -935,7 +944,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
             }
         } else {
             // --- File opened ---
-            if (metadata->client_flag == O_RDONLY) {
+            if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
                 // Only read calls are allowed and should perform freshness
                 // checks before reads, as usual. Write calls should fail and return -EMFILE.
 
@@ -1232,7 +1241,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
     } else {
         // --- File opened ---
 
-        if (fi->flags != O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) != O_RDONLY) {
             // watdfs_cli_release is responsible for transferring a writable file from the client to
             // server and unlocking it.
 
@@ -1242,7 +1251,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
                 fxn_ret = rpc_ret;
                 DLOG("watdfs_cli_release: Failed to upload file '%s' with errno %d before close", path, fxn_ret);
                 // not sure why it failed to upload. maybe the check for flags is not good enough
-                //return fxn_ret;
+                return fxn_ret;
             }
         }
 
@@ -1299,7 +1308,8 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
         return -EPERM; /* operation not permitted */
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
+            DLOG("watdfs_cli_read: file %s opened in RDONLY mode", path);
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             if (!is_fresh(userdata, path)) {
@@ -1365,7 +1375,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
         return -EPERM; /* operation not permitted */
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
@@ -1400,8 +1410,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                     // Upload failed.
                     DLOG("watdfs_cli_write failed to upload cache file '%s' info.", path);
                     fxn_ret = rpc_ret;
-                    // not sure why it failed to upload. maybe the check for flags is not good enough
-                    // return fxn_ret;
+                    return fxn_ret;
                 }
             }
         }
@@ -1441,7 +1450,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
 
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             DLOG("watdfs_cli_truncate: cannot write read only file '%s'", path);
@@ -1479,8 +1488,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
             // Upload failed.
             DLOG("watdfs_cli_truncate failed to upload cache file '%s' info.", path);
             fxn_ret = rpc_ret;
-            // not sure why it failed to upload. maybe the check for flags is not good enough
-            // return fxn_ret;
+            return fxn_ret;
         }
     }
 
@@ -1508,7 +1516,7 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
         return -EPERM; /* operation not permitted */
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             DLOG("watdfs_cli_truncate: cannot write read only file '%s'", path);
@@ -1526,8 +1534,7 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
                 // Upload failed.
                 DLOG("watdfs_cli_fsync failed to upload cache file '%s' info.", path);
                 fxn_ret = rpc_ret;
-                // not sure why it failed to upload. maybe the check for flags is not good enough
-                // return fxn_ret;
+                return fxn_ret;
             }
 
             // update Tc
@@ -1565,7 +1572,7 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
 
     } else {
         // --- File opened ---
-        if (metadata->client_flag == O_RDONLY) {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
             DLOG("watdfs_cli_utimensat: cannot write read only file '%s'", path);
@@ -1610,8 +1617,7 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
             DLOG("watdfs_cli_utimensat failed to upload cache file '%s' info.", path);
             fxn_ret = rpc_ret;
             free(full_path);
-            // not sure why it failed to upload. maybe the check for flags is not good enough
-            // return fxn_ret;
+            return fxn_ret;
         }
     }
 
