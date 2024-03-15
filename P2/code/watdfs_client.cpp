@@ -256,8 +256,8 @@ time_t *get_Tc(void *userdata, const char *path) {
 }
 
 int get_flags(void *userdata, const char *path) {
-    int                  flags  = -1;
-    auto                 it     = ((struct Userdata *)userdata)->files_opened.find(std::string(path));
+    int  flags = -1;
+    auto it    = ((struct Userdata *)userdata)->files_opened.find(std::string(path));
     if (it != ((struct Userdata *)userdata)->files_opened.end()) { // exists
         flags = it->second.client_flag & O_ACCMODE;
     }
@@ -373,8 +373,9 @@ int download_file(void *userdata, const char *path) {
     // --- Read file from server ---
     // firstly open file from server, we know it exists since we getattr.
     struct fuse_file_info *fi = new struct fuse_file_info;
+    fi->flags                 = O_RDONLY;
     // we just want to read the file and download to client.
-    rpc_ret   = rpc_open(userdata, path, fi);
+    rpc_ret = rpc_open(userdata, path, fi);
 
     // We just open READ ONLY, so it should not be causing any issue even if someone opened it for WRITE.
     if (rpc_ret < 0) {
@@ -532,7 +533,6 @@ int download_file(void *userdata, const char *path) {
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
-    
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
     if (metadata == NULL) {
@@ -547,7 +547,6 @@ int upload_file(void *userdata, const char *path) {
             return -EMFILE; // Too many open files
         }
     }
-    
 
     // The integer value that the actual function will return.
     int fxn_ret = 0;
@@ -579,7 +578,7 @@ int upload_file(void *userdata, const char *path) {
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-    
+
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -736,7 +735,7 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        //delete (statbuf_remote);
+        // delete (statbuf_remote);
         DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
@@ -762,7 +761,7 @@ int upload_file(void *userdata, const char *path) {
     // update Tc
     update_Tc(userdata, path);
 
-    //delete (statbuf_remote);
+    // delete (statbuf_remote);
     delete (statbuf_local);
     delete (buf_content);
     free(full_path);
@@ -1039,11 +1038,11 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         if (rpc_ret < 0) {
             // download cache fail
-                DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
+            DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
             fxn_ret = rpc_ret;
             return fxn_ret;
         }
-        
+
         return fxn_ret;
 
     } else {
@@ -1057,7 +1056,6 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
     free(full_path);
     // return final results, should be 0
     return fxn_ret;
-    
 }
 
 int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi) {
@@ -1125,7 +1123,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
                 DLOG("watdfs_cli_open: Failed to open file %s, file not exist", path);
                 free(full_path);
                 return -ENOENT;
-            } 
+            }
 
             // from P1:
             // If an application calls open with the O_CREAT flag and the file does not exist (how? by getattr?),
