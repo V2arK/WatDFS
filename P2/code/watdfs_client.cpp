@@ -988,13 +988,10 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // When the server receives a message to close a file it has opened in write mode,
         // the data structure should be modified to indicate that the file is now available to a writer.
 
-        // file system will call getattr before calling open() always.
-        // which will also call update.
-
         // get file stat from server
-        /*
-        struct stat *statbuf_remote = new struct stat;
-        rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
+        
+        //struct stat *statbuf_remote = new struct stat;
+        //rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
         if (rpc_ret < 0) {
             if (rpc_ret != -ENOENT) {
@@ -1037,7 +1034,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
             return fxn_ret;
         }
-        */
+        
 
         // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
         // for the file ( Tc). You can use the file modification time of the file to track T_client and T_server.
