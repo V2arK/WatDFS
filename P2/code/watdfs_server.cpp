@@ -20,12 +20,9 @@ INIT_LOG
 #include <string>
 #include <map>
 
-
-/*
 enum class OpType {
     RD, // read
-    WR, // write
-    N   // no operation
+    WR  // write (possibly also read)
 };
 
 struct FileInfo {
@@ -37,10 +34,10 @@ struct FileInfo {
         opType(opType), lock(lockPtr) {
     }
 };
-*/
 
-// short path : fileInfo
+// short path : lock * / OpType
 std::map<std::string, rw_lock *> global_lock_info;
+std::map<std::string, OpType>    global_open_info;
 
 // ----------------------------------------------------------
 
@@ -175,6 +172,43 @@ int watdfs_open(int *argTypes, void **args) {
     // Initially we set the return code to be 0.
     *ret = 0;
 
+    DLOG("watdfs_open: getting fileInfo for file %s", short_path);
+
+    // mutual exclusion of open
+    auto it = global_open_info.find(std::string(short_path));
+    if (it == global_open_info.end()) { // non exist
+        DLOG("watdfs_open: fileInfo not exist for file %s", short_path);
+        if (((fi->flags & O_ACCMODE) == O_RDWR) || ((fi->flags & O_ACCMODE) == O_WRONLY)) {
+            // file has no reader / writer, add to it
+            DLOG("watdfs_open: fileInfo adding with WR for file %s", short_path);
+            global_open_info.insert(std::make_pair(std::string(short_path), OpType::WR));
+        } else {
+            // file has no reader / writer, add to it
+            DLOG("watdfs_open: fileInfo adding with RD for file %s", short_path);
+            global_open_info.insert(std::make_pair(std::string(short_path), OpType::RD));
+        }
+    } else { // exist
+        DLOG("watdfs_open: fileInfo exist for file %s", short_path);
+        // fileInfo exists.
+        // When a file is opened, it is opened with a file access mode (i.e. O_RDONLY, O_WRONLY, O_RDWR).
+        if (((fi->flags & O_ACCMODE) == O_RDWR) || ((fi->flags & O_ACCMODE) == O_WRONLY)) {
+            // the server should return an error(-EACCES) if a client attempts to open a file(wit hwrite mode)
+            // and the file is already opened (in write mode)
+            DLOG("watdfs_open: fileInfo exist for file %s, and tring to WR", short_path);
+            if (it->second == OpType::WR) {
+                *ret = -EACCES;
+                // Clean up the full path, it was allocated on the heap.
+                free(full_path);
+                // The RPC call succeeded, so return 0.
+                DLOG("watdfs_open: double write prohibited for file %s", short_path);
+                return 0;
+            } else {
+                // some reader, now i am a writer
+                global_open_info[std::string(short_path)] = OpType::WR;
+            }
+        }
+    }
+
     // Let sys_ret be the return code from the stat system call.
     int sys_ret = open(full_path, fi->flags);
 
@@ -217,6 +251,25 @@ int watdfs_release(int *argTypes, void **args) {
 
     // Initially we set the return code to be 0.
     *ret = 0;
+
+    // mutual exclusion of open
+    auto it = global_open_info.find(std::string(short_path));
+    if (it == global_open_info.end()) { // non exist
+        // case not possible
+    } else {
+        // fileInfo exists.
+        // When a file is opened, it is opened with a file access mode (i.e. O_RDONLY, O_WRONLY, O_RDWR).
+        if (((fi->flags & O_ACCMODE) == O_RDWR) || ((fi->flags & O_ACCMODE) == O_WRONLY)) {
+            // the server should return an error(-EACCES) if a client attempts to open a file(wit hwrite mode)
+            // and the file is already opened (in write mode)
+            global_open_info[std::string(short_path)] = OpType::RD;
+            DLOG("watdfs_release: fileInfo reset to RD for file %s", short_path);
+            // previously it must be WR
+            // we just don't delete the entry, leave it in there forever.
+        } else {
+            DLOG("watdfs_release: fileInfo kept as RD for file %s", short_path);
+        }
+    }
 
     // Let sys_ret be the return code from the close system call.
     int sys_ret = close(fi->fh);
@@ -555,7 +608,7 @@ int watdfs_unlock(int *argTypes, void **args) {
     // Initially we set the return code to be 0.
     *ret = 0;
 
-    DLOG("watdfs_lock called on file %s", short_path.c_str());
+    DLOG("watdfs_unlock called on file %s", short_path.c_str());
 
     // get lock info
     auto it = global_lock_info.find(short_path);
