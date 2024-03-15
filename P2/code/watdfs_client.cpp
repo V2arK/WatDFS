@@ -233,18 +233,6 @@ struct Metadata *get_metadata_opened(void *userdata, const char *path) {
 
 // return NULL if file not exist in userdata (not opened)
 // otherwize return the Metadata.
-time_t *get_tc(void *userdata, const char *path) {
-    auto it = ((struct Userdata *)userdata)->Tc.find(std::string(path));
-
-    if (it != ((struct Userdata *)userdata)->Tc.end()) { // exists
-        return &(it->second);
-    } else { // non exist
-        return NULL;
-    }
-}
-
-// return NULL if file not exist in userdata (not opened)
-// otherwize return the Metadata.
 time_t *get_Tc(void *userdata, const char *path) {
     auto it = ((struct Userdata *)userdata)->Tc.find(std::string(path));
 
@@ -841,7 +829,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
 
     struct Metadata *metadata = get_metadata_opened(userdata, path);
 
-    time_t *tc = get_tc(userdata, path);
+    time_t *tc = get_Tc(userdata, path);
     if ((tc != NULL) && (is_fresh(userdata, path))) {
         // we cached the file and fresh, then we can just return its getattr
         DLOG("watdfs_cli_getattr: returning attr on cached file %s", path);
