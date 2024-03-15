@@ -1023,22 +1023,22 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
 
         // TODO: Need to remote Tc?
 
-        // create the file on the server as well
-        rpc_ret = rpc_mknod(userdata, path, mode, dev);
+        // create the file on the client
+        rpc_ret = mknod(full_path, mode, dev);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod: Failed to mknod on server %s with error code %d", path, rpc_ret);
+            DLOG("watdfs_cli_mknod: Failed to mknod cache %s with error code %d", path, rpc_ret);
             fxn_ret = rpc_ret;
             free(full_path);
             return fxn_ret;
         }
 
-        // just download it
-        rpc_ret = download_file(userdata, path);
+        // just upload it
+        rpc_ret = upload_file(userdata, path);
 
         if (rpc_ret < 0) {
             // download cache fail
-            DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
+            DLOG("watdfs_cli_read failed to upload cache file '%s' info.", path);
             fxn_ret = rpc_ret;
             return fxn_ret;
         }
