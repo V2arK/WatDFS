@@ -488,7 +488,6 @@ int watdfs_utimensat(int *argTypes, void **args) {
 // The server implementation of lock.
 int watdfs_lock(int *argTypes, void **args) {
     // Get the arguments.
-
     // The first argument is the path relative to the mountpoint.
     std::string short_path((char *)args[0]);
 
@@ -501,24 +500,31 @@ int watdfs_lock(int *argTypes, void **args) {
     // Initially we set the return code to be 0.
     *ret = 0;
 
+    DLOG("watdfs_lock called on file %s", short_path.c_str());
+
     // get lock info
     auto it = global_lock_info.find(short_path);
 
     if (it == global_lock_info.end()) { // non exist
         // create entry
         // global_lock_info[short_path].opType = OpType::N; // right now there is no operations
+        DLOG("watdfs_lock creating lock on file %s", short_path.c_str());
         global_lock_info[short_path] = new rw_lock_t;
         // init lock
+        DLOG("watdfs_lock initing lock on file %s", short_path.c_str());
         sys_ret = rw_lock_init(global_lock_info[short_path]);
 
         if (sys_ret < 0) {
             *ret = -errno;
             DLOG("Failed to create lock on file %s with errno %d", short_path.c_str(), errno);
         }
+
+        // get lock again
+        it = global_lock_info.find(short_path);
     }
 
     // now lock exists.
-
+    DLOG("watdfs_lock trying to acquire lock on file %s", short_path.c_str());
     // try to acquire the lock in the given mode
     sys_ret = rw_lock_lock(it->second, mode);
 
@@ -548,6 +554,8 @@ int watdfs_unlock(int *argTypes, void **args) {
     int  sys_ret = 0;
     // Initially we set the return code to be 0.
     *ret = 0;
+
+    DLOG("watdfs_lock called on file %s", short_path.c_str());
 
     // get lock info
     auto it = global_lock_info.find(short_path);
@@ -963,6 +971,16 @@ int main(int argc, char *argv[]) {
     // rpcExecute could fail, so you may want to have debug-printing here, and
     // then you should return.
     ret = rpcExecute();
+
+    // clean all locks
+    for (auto it : global_lock_info) {
+        int lock_ret = rw_lock_destroy(it.second);
+
+        if (lock_ret < 0) {
+            DLOG("Failed to destroy lock on file %s", it.first.c_str());
+        }
+    }
+
     if (ret != 0) {
         // Handle error.
         DLOG("RPC execution failed.");
