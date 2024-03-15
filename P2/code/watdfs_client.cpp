@@ -663,7 +663,7 @@ int upload_file(void *userdata, const char *path) {
     */
 
     // --- truncate the file at the server to make sure its at the right size ---
-    rpc_ret = rpc_truncate(userdata, path, statbuf_local->st_size);
+    rpc_ret = rpc_truncate(userdata, path, 0);
 
     if (rpc_ret < 0) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
