@@ -16,9 +16,15 @@ INIT_LOG
 #include <map>
 
 struct Metadata {
-    int client_flag;
-    int fileDesc_client;
-    int fileHandle_server;
+    int      client_flag;
+    int      fileDesc_client;
+    uint64_t fileHandle_server;
+
+    // Constructor
+    Metadata(int flag, int fd_client, uint64_t fh_server) :
+        client_flag(flag), fileDesc_client(fd_client), fileHandle_server(fh_server) {
+        // Initialization list sets the values of the members
+    }
 };
 
 // global variables
@@ -218,8 +224,9 @@ struct Metadata *get_metadata_opened(void *userdata, const char *path) {
     auto it = ((struct Userdata *)userdata)->files_opened.find(std::string(path));
 
     if (it != ((struct Userdata *)userdata)->files_opened.end()) { // exists
-        return &(it->second);
+        return &it->second;
     } else { // non exist
+        DLOG("Metadata not found for %s", path);
         return NULL;
     }
 }
@@ -516,9 +523,8 @@ int download_file(void *userdata, const char *path) {
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
-    /*
+    
     struct Metadata *metadata = get_metadata_opened(userdata, path);
-
 
     if (metadata == NULL) {
         // --- File not opened ---
@@ -532,7 +538,7 @@ int upload_file(void *userdata, const char *path) {
             return -EMFILE; // Too many open files
         }
     }
-    */
+    
 
     // The integer value that the actual function will return.
     int fxn_ret = 0;
@@ -558,13 +564,13 @@ int upload_file(void *userdata, const char *path) {
     // the file descriptor shall not share it with any other process in the system.
     int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
 
-    // int fileDesc_local = ((struct Metadata *)userdata)->fileDesc_client;
+    // int fileDesc_local = metadata->fileDesc_client;
 
     // Upon successful completion, the function shall open the file and
     // return a non-negative integer representing the lowest numbered unused file descriptor.
     // Otherwise, -1 shall be returned and errno set to indicate the error.
     // No files shall be created or modified if the function returns -1.
-
+    
     if (fileDesc_local == -1) {
         // failed to open file.
         fxn_ret = -errno;
@@ -583,13 +589,13 @@ int upload_file(void *userdata, const char *path) {
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
-        DLOG("RPC failed on reading local content on file %s with error code %d", path, errno);
+        DLOG("RPC failed on reading local content on file %s with fileDesc %d with error code %d", path, fileDesc_local, errno);
         close(fileDesc_local);
         return fxn_ret;
     }
 
     // --- Close local file, we done reading ---
-    // close(fileDesc_local);
+    close(fileDesc_local);
 
     // Lock
     rpc_ret = lock(path, RW_WRITE_LOCK);
@@ -605,11 +611,12 @@ int upload_file(void *userdata, const char *path) {
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
     // fill out fi
-    // fi->fh    = metadata->fileHandle_server;
-    fi->flags = O_RDWR;
+    fi->fh    = metadata->fileHandle_server;
+    //fi->flags = O_RDWR;
 
     // Create file should be handled by open and mknod
 
+    /*
     rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
@@ -645,9 +652,10 @@ int upload_file(void *userdata, const char *path) {
             return fxn_ret;
         }
     }
+    */
 
     // --- truncate the file at the server to make sure its empty ---
-    rpc_ret = watdfs_cli_truncate(userdata, path, 0);
+    rpc_ret = rpc_truncate(userdata, path, 0);
 
     if (rpc_ret < 0) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
@@ -677,6 +685,7 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
+    /*
     // --- get server file metadata (client follow server's time) ---
     struct stat *statbuf_remote = new struct stat;
     rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
@@ -693,6 +702,7 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
+    */
 
     // --- Release server file ---
 
@@ -715,11 +725,12 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        delete (statbuf_remote);
+        //delete (statbuf_remote);
         DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
 
+    /*
     // --- update the file metadata at the client to match server ---
     struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
     fxn_ret               = futimens(fileDesc_local, ts);
@@ -735,8 +746,12 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
+    */
 
-    delete (statbuf_remote);
+    // update Tc
+    update_Tc(userdata, path);
+
+    //delete (statbuf_remote);
     delete (statbuf_local);
     delete (buf_content);
     free(full_path);
@@ -1229,25 +1244,19 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // which you should track at the client. As part of these open calls,
         // you should satisfy the mutual exclusion requirements (suggestions in Section 7.2.3).
 
-        // --- Create  Metadata ---
-
-        metadata = &((struct Userdata *)userdata)->files_opened[std::string(path)];
-        metadata->client_flag = fi->flags;
         // --- Open local file ---
-
         // Once the file has been copied to the client, the original flags received by watdfs_cli_open must be used,
         // such that the file handle returned from this call respects the flag properties (e.g., read-only, write-only).
-        metadata->fileDesc_client = open(full_path, fi->flags);
+        int fileDesc_local = open(full_path, fi->flags);
 
-        if (metadata->fileDesc_client == -1) {
+        if (fileDesc_local == -1) {
             DLOG("Failed to open existing file %s with error code %d", path, errno);
             fxn_ret = -errno;
             // clear this entry
-            ((struct Userdata *)userdata)->files_opened.erase(std::string(path));
+            //((struct Userdata *)userdata)->files_opened.erase(std::string(path));
             free(full_path);
             return fxn_ret;
         }
-
         // --- Open remote file ---
 
         rpc_ret = rpc_open(userdata, path, fi);
@@ -1268,9 +1277,12 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             return fxn_ret;
         }
 
-        // save file handler
-        metadata->fileHandle_server = fi->fh;
-
+        // --- Create  Metadata ---
+        ((struct Userdata *)userdata)->files_opened.insert(std::make_pair(std::string(path), Metadata{fi->flags, fileDesc_local, fi->fh}));
+        DLOG("watdfs_cli_open: Metadata created for file %s", path);
+        DLOG("watdfs_cli_open: Local cached file open with fileDesc %d", fileDesc_local);
+        DLOG("watdfs_cli_open: Remote file open with fileHandle %ld", fi->fh);
+        DLOG("watdfs_cli_open: flag %d", fi->flags);
     } else {
         // --- File opened ---
         // we cannot open an opened file..
@@ -1627,7 +1639,7 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
 
         if (rpc_ret < 0) {
             fxn_ret = rpc_ret;
-            DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
+            DLOG("watdfs_cli_utimensat: Failed to update local file '%s'", path);
             return fxn_ret;
         }
 
@@ -1642,10 +1654,16 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
         }
     }
 
+    DLOG("watdfs_cli_utimensat: Local cached file open with fileDesc %d", metadata->fileDesc_client);
+    DLOG("watdfs_cli_utimensat: Remote file open with fileHandle %ld", metadata->fileHandle_server);
+    DLOG("watdfs_cli_utimensat: flag %d", metadata->client_flag);
+
     // Read calls should not perform freshness checks, as there
     // would be no updates on the server due to write exclusion and this prevents
     // overwriting local file updates if freshness condition has expired.
     // Write calls should perform the freshness checks at the end of writes, as usual.
+
+    DLOG("watdfs_cli_utimensat: Now change local file %s.", path);
 
     // If pathname is absolute (true for our case), then dirfd is ignored.
     rpc_ret = utimensat(0, full_path, ts, 0);
@@ -1657,11 +1675,14 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
         return fxn_ret;
     }
 
+    DLOG("watdfs_cli_utimensat: Now update Tc on file %s.", path);
+
     // update Tc
     update_Tc(userdata, path);
 
     // freshness check
     if (!is_fresh(userdata, path)) {
+        DLOG("watdfs_cli_utimensat: Now upload file %s.", path);
         rpc_ret = upload_file(userdata, path);
 
         if (rpc_ret < 0) {
