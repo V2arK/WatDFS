@@ -610,7 +610,6 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to truncate server file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
-        unlock(path, RW_WRITE_LOCK);
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
@@ -626,7 +625,6 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("upload: Failed to write into remote file %s with error code %d", path, rpc_ret);
         fxn_ret = rpc_ret;
-        unlock(path, RW_WRITE_LOCK);
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
