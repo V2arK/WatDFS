@@ -1013,7 +1013,7 @@ int watdfs_cli_mknod(void *userdata, const char *path, mode_t mode, dev_t dev) {
         rpc_ret = unlink(full_path);
 
         if (rpc_ret < 0) {
-            DLOG("watdfs_cli_mknod warning: Failed to remove cached file %s with error code %d", path, errno);
+            DLOG("watdfs_cli_mknod warning: Failed to remove cached file %s with error code %d", full_path, errno);
             // we don't really care if we removed it or not, because the file may not exists
         }
 
@@ -1382,6 +1382,9 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                 fxn_ret = -errno;
                 DLOG("watdfs_cli_write failed to write to cache file '%s', errno %d.", path, fxn_ret);
                 return fxn_ret;
+            } else {
+                fxn_ret = rpc_ret;
+                // update how many byte written
             }
 
             DLOG("watdfs_cli_write succeed to write to cache file '%s'", path);
