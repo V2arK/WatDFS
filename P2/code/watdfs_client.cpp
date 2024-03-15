@@ -603,7 +603,7 @@ int upload_file(void *userdata, const char *path) {
         // not sure whicih Error Code referring to file not exit, so we assume thats the case
         DLOG("Assuming file %s not exist with error code %d", path, rpc_ret);
         // create file on server
-        rpc_ret = watdfs_cli_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
+        rpc_ret = rpc_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
 
         if (rpc_ret < 0) {
             unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
@@ -617,7 +617,7 @@ int upload_file(void *userdata, const char *path) {
         }
 
         // open file from server again, we know it exists since we created it.
-        rpc_ret = watdfs_cli_open(userdata, path, fi);
+        rpc_ret = rpc_open(userdata, path, fi);
 
         if (rpc_ret < 0) {
             unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
