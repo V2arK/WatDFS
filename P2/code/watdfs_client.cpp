@@ -1241,7 +1241,8 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
             if (rpc_ret < 0) {
                 fxn_ret = rpc_ret;
                 DLOG("watdfs_cli_release: Failed to upload file '%s' with errno %d before close", path, fxn_ret);
-                return fxn_ret;
+                // not sure why it failed to upload. maybe the check for flags is not good enough
+                //return fxn_ret;
             }
         }
 
@@ -1399,7 +1400,8 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                     // Upload failed.
                     DLOG("watdfs_cli_write failed to upload cache file '%s' info.", path);
                     fxn_ret = rpc_ret;
-                    return fxn_ret;
+                    // not sure why it failed to upload. maybe the check for flags is not good enough
+                    // return fxn_ret;
                 }
             }
         }
@@ -1477,7 +1479,8 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
             // Upload failed.
             DLOG("watdfs_cli_truncate failed to upload cache file '%s' info.", path);
             fxn_ret = rpc_ret;
-            return fxn_ret;
+            // not sure why it failed to upload. maybe the check for flags is not good enough
+            // return fxn_ret;
         }
     }
 
@@ -1523,7 +1526,8 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
                 // Upload failed.
                 DLOG("watdfs_cli_fsync failed to upload cache file '%s' info.", path);
                 fxn_ret = rpc_ret;
-                return fxn_ret;
+                // not sure why it failed to upload. maybe the check for flags is not good enough
+                // return fxn_ret;
             }
 
             // update Tc
@@ -1606,7 +1610,8 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
             DLOG("watdfs_cli_utimensat failed to upload cache file '%s' info.", path);
             fxn_ret = rpc_ret;
             free(full_path);
-            return fxn_ret;
+            // not sure why it failed to upload. maybe the check for flags is not good enough
+            // return fxn_ret;
         }
     }
 
