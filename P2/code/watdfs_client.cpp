@@ -533,24 +533,10 @@ int download_file(void *userdata, const char *path) {
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
-    struct Metadata *metadata = get_metadata_opened(userdata, path);
-
-    if (metadata == NULL) {
-        // --- File not opened ---
-        DLOG("Upload: failed to upload un-opened file local file %s ", path);
-        return -ENOENT; // No such file or directory
-    } else {
-        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
-            // Only read calls are allowed and should perform freshness
-            // checks before reads, as usual. Write calls should fail and return -EMFILE.
-            DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
-            return -EMFILE; // Too many open files
-        }
-    }
-
-    // The integer value that the actual function will return.
+    // The integer value watdfs_cli_getattr will return.
     int fxn_ret = 0;
     int rpc_ret = 0;
+
     // --- get file attributes from the client ---
 
     // Get the local file name, so we call our helper function which appends
@@ -567,32 +553,23 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // --- Open local file for reading and writing ---
+    // --- Open local file for reading ---
 
-    // the file descriptor shall not share it with any other process in the system.
-    int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
-
-    // int fileDesc_local = metadata->fileDesc_client;
-
-    // Upon successful completion, the function shall open the file and
-    // return a non-negative integer representing the lowest numbered unused file descriptor.
-    // Otherwise, -1 shall be returned and errno set to indicate the error.
-    // No files shall be created or modified if the function returns -1.
+    int fileDesc_local = open(full_path, O_RDONLY); 
 
     if (fileDesc_local == -1) {
         // failed to open file.
-        fxn_ret = -errno;
         delete (statbuf_local);
         free(full_path);
-        DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
+        DLOG("Upload failed on open (O_RDONLY) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
-    fxn_ret           = pread(fileDesc_local, buf_content, statbuf_local->st_size, 0);
+    rpc_ret           = pread(fileDesc_local, buf_content, statbuf_local->st_size, 0);
 
-    if (fxn_ret < 0) {
+    if (rpc_ret < 0) {
         fxn_ret = -errno;
         delete (statbuf_local);
         delete (buf_content);
@@ -618,18 +595,13 @@ int upload_file(void *userdata, const char *path) {
     // --- open file on server ---
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
-    // fill out fi
-    fi->fh    = metadata->fileHandle_server;
-    fi->flags = metadata->client_flag;
+    fi->flags = O_WRONLY;
 
-    // Create file should be handled by open and mknod
-
-    /*
     rpc_ret = rpc_open(userdata, path, fi);
 
     if (rpc_ret < 0) {
         // not sure whicih Error Code referring to file not exit, so we assume thats the case
-        DLOG("Assuming file %s not exisint with error code %d", path, errno);
+        DLOG("Assuming file %s not exist with error code %d", path, rpc_ret);
         // create file on server
         rpc_ret = watdfs_cli_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
 
@@ -641,7 +613,6 @@ int upload_file(void *userdata, const char *path) {
             free(full_path);
             delete (fi);
             DLOG("RPC failed on creating new file %s on server with error code %d", path, errno);
-            close(fileDesc_local);
             return fxn_ret;
         }
 
@@ -656,11 +627,9 @@ int upload_file(void *userdata, const char *path) {
             free(full_path);
             delete (fi);
             DLOG("RPC failed on opening new file %s on server with error code %d", path, errno);
-            close(fileDesc_local);
             return fxn_ret;
         }
     }
-    */
 
     // --- truncate the file at the server to make sure its at the right size ---
     rpc_ret = rpc_truncate(userdata, path, 0);
@@ -673,7 +642,6 @@ int upload_file(void *userdata, const char *path) {
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -689,46 +657,37 @@ int upload_file(void *userdata, const char *path) {
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
         return fxn_ret;
     }
 
-    /*
-    // --- get server file metadata (client follow server's time) ---
-    struct stat *statbuf_remote = new struct stat;
-    rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
+    // --- update the file metadata at the client to match server ---
+    struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
+    rpc_ret               = rpc_utimensat(userdata, path, ts);
 
     if (rpc_ret < 0) {
-        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-        DLOG("Failed to getattr from remote file %s with error code %d", full_path, errno);
-        fxn_ret = -errno;
+        DLOG("upload: Failed to utimensat on remote file %s with error code %d", full_path, rpc_ret);
+        fxn_ret = rpc_ret;
         delete (statbuf_local);
-        delete (statbuf_remote);
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
         return fxn_ret;
     }
-    */
 
-    /*
     // --- Release server file ---
 
     rpc_ret = rpc_release(userdata, path, fi);
 
     if (rpc_ret < 0) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-        DLOG("Failed to release file %s from server with error code %d", path, errno);
-        fxn_ret = -errno;
-        delete (fi);
+        DLOG("upload: Failed to release file %s from server with error code %d", path, rpc_ret);
+        fxn_ret = rpc_ret;
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
-        close(fileDesc_local);
+        delete (fi);
         return fxn_ret;
     }
-    */
 
     // Unlock
     rpc_ret = unlock(path, RW_WRITE_LOCK);
@@ -736,40 +695,23 @@ int upload_file(void *userdata, const char *path) {
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
         // delete (statbuf_remote);
-        DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
-        return fxn_ret;
-    }
-
-    /*
-    // --- update the file metadata at the client to match server ---
-    struct timespec ts[2] = {statbuf_remote->st_atim, statbuf_remote->st_mtim};
-    fxn_ret               = futimens(fileDesc_local, ts);
-
-    if (fxn_ret < 0) {
-        DLOG("Failed to utimensat on local file %s with error code %d", full_path, errno);
-        fxn_ret = -errno;
-        delete (statbuf_remote);
+        DLOG("upload: failed on releasing write lock on file %s with error code %d", path, rpc_ret);
+        fxn_ret = rpc_ret;
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
         return fxn_ret;
     }
-    */
 
-    // update Tc
+    // --- Update Tc ---
     update_Tc(userdata, path);
 
-    // delete (statbuf_remote);
+    DLOG("upload: succeed on file %s", path);
     delete (statbuf_local);
     delete (buf_content);
     free(full_path);
     delete (fi);
-    // close(fileDesc_local);
-
-    DLOG("upload_file on %s exit successfully", path);
-
     return fxn_ret;
 }
 
@@ -1854,11 +1796,7 @@ int rpc_open(void *userdata, const char *path, struct fuse_file_info *fi) {
     // Clean up the memory we have allocated.
     delete[] args;
 
-    // Finally return the value we got from the server.
-    errno = fxn_ret;
-    DLOG("open succeed with file handler: %ld", (unsigned long)fxn_ret);
-
-    return 0;
+    return fxn_ret;
 }
 
 int rpc_release(void *userdata, const char *path, struct fuse_file_info *fi) {
@@ -2318,11 +2256,7 @@ int rpc_truncate(void *userdata, const char *path, off_t newsize) {
     // Clean up the memory we have allocated.
     delete[] args;
 
-    // Finally return the value we got from the server.
-    errno = fxn_ret;
-    DLOG("truncate succeed with code: %ld", (unsigned long)fxn_ret);
-
-    return 0;
+    return fxn_ret;
 }
 
 int rpc_fsync(void *userdata, const char *path, struct fuse_file_info *fi) {
@@ -2466,9 +2400,5 @@ int rpc_utimensat(void *userdata, const char *path, const struct timespec ts[2])
     // Clean up the memory we have allocated.
     delete[] args;
 
-    // Finally return the value we got from the server.
-    errno = fxn_ret;
-    DLOG("utimensat succeed with file handler: %ld", (unsigned long)fxn_ret);
-
-    return 0;
+    return fxn_ret;
 }
