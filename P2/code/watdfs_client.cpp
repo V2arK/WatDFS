@@ -584,7 +584,7 @@ int upload_file(void *userdata, const char *path) {
     }
 
     // --- Close local file, we done reading ---
-    close(fileDesc_local);
+    close(fileDesc_local); // didn't bother to check
 
     // Lock
     rpc_ret = lock(path, RW_WRITE_LOCK);
@@ -610,11 +610,11 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("Failed to truncate server file %s with error code %d", full_path, errno);
         fxn_ret = -errno;
+        unlock(path, RW_WRITE_LOCK);
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -626,11 +626,26 @@ int upload_file(void *userdata, const char *path) {
         unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
         DLOG("upload: Failed to write into remote file %s with error code %d", path, rpc_ret);
         fxn_ret = rpc_ret;
+        unlock(path, RW_WRITE_LOCK);
         delete (statbuf_local);
         delete (buf_content);
         free(full_path);
         delete (fi);
-        close(fileDesc_local);
+        return fxn_ret;
+    }
+
+    // --- update the file metadata at the client to match server ---
+    struct timespec ts[2] = {statbuf_local->st_atim, statbuf_local->st_mtim};
+    rpc_ret               = rpc_utimensat(userdata, path, ts);
+
+    if (rpc_ret < 0) {
+        DLOG("Failed to utimensat on remote file %s with error code %d", full_path, rpc_ret);
+        fxn_ret = rpc_ret;
+        unlock(path, RW_WRITE_LOCK);
+        delete (statbuf_local);
+        delete (buf_content);
+        free(full_path);
+        delete (fi);
         return fxn_ret;
     }
 
@@ -639,7 +654,10 @@ int upload_file(void *userdata, const char *path) {
 
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
-        // delete (statbuf_remote);
+        delete (statbuf_local);
+        delete (buf_content);
+        free(full_path);
+        delete (fi);
         DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
