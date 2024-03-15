@@ -704,6 +704,7 @@ int upload_file(void *userdata, const char *path) {
     }
     */
 
+    /*
     // --- Release server file ---
 
     rpc_ret = rpc_release(userdata, path, fi);
@@ -719,6 +720,7 @@ int upload_file(void *userdata, const char *path) {
         close(fileDesc_local);
         return fxn_ret;
     }
+    */
 
     // Unlock
     rpc_ret = unlock(path, RW_WRITE_LOCK);
