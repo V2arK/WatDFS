@@ -521,10 +521,24 @@ int download_file(void *userdata, const char *path) {
 int upload_file(void *userdata, const char *path) {
     DLOG("Start to upload file %s", path);
 
-    // The integer value watdfs_cli_getattr will return.
+    struct Metadata *metadata = get_metadata_opened(userdata, path);
+
+    if (metadata == NULL) {
+        // --- File not opened ---
+        DLOG("Upload: failed to upload un-opened file local file %s ", path);
+        return -ENOENT; // No such file or directory
+    } else {
+        if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
+            // Only read calls are allowed and should perform freshness
+            // checks before reads, as usual. Write calls should fail and return -EMFILE.
+            DLOG("watdfs_cli_write: cannot write read only file '%s'", path);
+            return -EMFILE; // Too many open files
+        }
+    }
+
+    // The integer value that the actual function will return.
     int fxn_ret = 0;
     int rpc_ret = 0;
-
     // --- get file attributes from the client ---
 
     // Get the local file name, so we call our helper function which appends
@@ -541,23 +555,25 @@ int upload_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // --- Open local file for reading ---
+    // --- Open local file for reading and writing ---
 
-    int fileDesc_local = open(full_path, O_RDONLY); 
+    // the file descriptor shall not share it with any other process in the system.
+    int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
 
     if (fileDesc_local == -1) {
         // failed to open file.
+        fxn_ret = -errno;
         delete (statbuf_local);
         free(full_path);
-        DLOG("Upload failed on open (O_RDONLY) local file %s with error code %d", path, errno);
+        DLOG("RPC failed on open (O_RDWR) local file %s with error code %d", path, errno);
         return fxn_ret;
     }
 
     // --- Read local file ---
     char *buf_content = new char[statbuf_local->st_size];
-    rpc_ret           = pread(fileDesc_local, buf_content, statbuf_local->st_size, 0);
+    fxn_ret           = pread(fileDesc_local, buf_content, statbuf_local->st_size, 0);
 
-    if (rpc_ret < 0) {
+    if (fxn_ret < 0) {
         fxn_ret = -errno;
         delete (statbuf_local);
         delete (buf_content);
@@ -583,41 +599,9 @@ int upload_file(void *userdata, const char *path) {
     // --- open file on server ---
     // firstly open file from server, we know it exists since we created it otherwize.
     struct fuse_file_info *fi = new struct fuse_file_info;
-    fi->flags = O_WRONLY;
-
-    rpc_ret = rpc_open(userdata, path, fi);
-
-    if (rpc_ret < 0) {
-        // not sure whicih Error Code referring to file not exit, so we assume thats the case
-        DLOG("Assuming file %s not exist with error code %d", path, rpc_ret);
-        // create file on server
-        rpc_ret = rpc_mknod(userdata, path, statbuf_local->st_mode, statbuf_local->st_dev);
-
-        if (rpc_ret < 0) {
-            unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-            fxn_ret = -errno;
-            delete (statbuf_local);
-            delete (buf_content);
-            free(full_path);
-            delete (fi);
-            DLOG("RPC failed on creating new file %s on server with error code %d", path, errno);
-            return fxn_ret;
-        }
-
-        // open file from server again, we know it exists since we created it.
-        rpc_ret = rpc_open(userdata, path, fi);
-
-        if (rpc_ret < 0) {
-            unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-            fxn_ret = -errno;
-            delete (statbuf_local);
-            delete (buf_content);
-            free(full_path);
-            delete (fi);
-            DLOG("RPC failed on opening new file %s on server with error code %d", path, errno);
-            return fxn_ret;
-        }
-    }
+    // fill out fi
+    fi->fh    = metadata->fileHandle_server;
+    fi->flags = metadata->client_flag;
 
     // --- truncate the file at the server to make sure its at the right size ---
     rpc_ret = rpc_truncate(userdata, path, 0);
@@ -630,6 +614,7 @@ int upload_file(void *userdata, const char *path) {
         delete (buf_content);
         free(full_path);
         delete (fi);
+        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -645,35 +630,7 @@ int upload_file(void *userdata, const char *path) {
         delete (buf_content);
         free(full_path);
         delete (fi);
-        return fxn_ret;
-    }
-
-    // --- update the file metadata at the client to match server ---
-    struct timespec ts[2] = {statbuf_local->st_mtim, statbuf_local->st_mtim};
-    rpc_ret               = rpc_utimensat(userdata, path, ts);
-
-    if (rpc_ret < 0) {
-        DLOG("upload: Failed to utimensat on remote file %s with error code %d", full_path, rpc_ret);
-        fxn_ret = rpc_ret;
-        delete (statbuf_local);
-        delete (buf_content);
-        free(full_path);
-        delete (fi);
-        return fxn_ret;
-    }
-
-    // --- Release server file ---
-
-    rpc_ret = rpc_release(userdata, path, fi);
-
-    if (rpc_ret < 0) {
-        unlock(path, RW_WRITE_LOCK); // release lock, don't bother to check result
-        DLOG("upload: Failed to release file %s from server with error code %d", path, rpc_ret);
-        fxn_ret = rpc_ret;
-        delete (statbuf_local);
-        delete (buf_content);
-        free(full_path);
-        delete (fi);
+        close(fileDesc_local);
         return fxn_ret;
     }
 
@@ -683,23 +640,22 @@ int upload_file(void *userdata, const char *path) {
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
         // delete (statbuf_remote);
-        DLOG("upload: failed on releasing write lock on file %s with error code %d", path, rpc_ret);
-        fxn_ret = rpc_ret;
-        delete (statbuf_local);
-        delete (buf_content);
-        free(full_path);
-        delete (fi);
+        DLOG("RPC failed on releasing write lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
 
-    // --- Update Tc ---
+    // update Tc
     update_Tc(userdata, path);
 
-    DLOG("upload: succeed on file %s", path);
+    // delete (statbuf_remote);
     delete (statbuf_local);
     delete (buf_content);
     free(full_path);
     delete (fi);
+    // close(fileDesc_local);
+
+    DLOG("upload_file on %s exit successfully", path);
+
     return fxn_ret;
 }
 
@@ -1032,19 +988,23 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
         // When the server receives a message to close a file it has opened in write mode,
         // the data structure should be modified to indicate that the file is now available to a writer.
 
+        // file system will call getattr before calling open() always.
+        // which will also call update.
+
         // get file stat from server
+        /*
         struct stat *statbuf_remote = new struct stat;
         rpc_ret                     = rpc_getattr(userdata, path, statbuf_remote);
 
         if (rpc_ret < 0) {
             if (rpc_ret != -ENOENT) {
-                /* Not sure whats happened */
+                // Not sure whats happened
                 DLOG("watdfs_cli_open: Failed to getattr on remote file %s, with errno %d", path, rpc_ret);
                 fxn_ret = -rpc_ret;
                 free(full_path);
                 return fxn_ret;
             }
-            /* No such file or directory */
+            // No such file or directory
             // only use the following flags:
             // O_CREAT, O_APPEND, O_EXCL, O_RDONLY, O_WRONLY, and O_RDWR.
 
@@ -1067,6 +1027,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             return -ENOENT;
         }
 
+
         DLOG("watdfs_cli_open: updating file %s", path);
         // download / update file if it's not fresh, fail if file not exist
         rpc_ret = update_file(userdata, path);
@@ -1076,6 +1037,7 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
             return fxn_ret;
         }
+        */
 
         // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
         // for the file ( Tc). You can use the file modification time of the file to track T_client and T_server.
@@ -1366,7 +1328,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
 
     if (metadata == NULL) {
         // --- File not opened ---
-
+        DLOG("watdfs_cli_truncate: File not opened '%s', update next ", path);
         // download / update file if it's not fresh, fail if file not exist
         rpc_ret = update_file(userdata, path);
 
@@ -1410,6 +1372,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
 
     // freshness check
     if (!is_fresh(userdata, path)) {
+        DLOG("watdfs_cli_truncate: upload file '%s'", path);
         rpc_ret = upload_file(userdata, path);
 
         if (rpc_ret < 0) {
