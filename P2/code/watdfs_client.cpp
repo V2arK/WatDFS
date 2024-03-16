@@ -266,6 +266,7 @@ bool is_fresh(void *userdata, const char *path) {
 
     if ((T - *Tc) < ((struct Userdata *)userdata)->cache_interval) {
         // case (i)
+        DLOG("case (i): %s", path);
         return true;
     }
 
@@ -291,6 +292,7 @@ bool is_fresh(void *userdata, const char *path) {
 
     if (statbuf_local->st_mtime == statbuf_remote->st_mtime) {
         // case (ii)
+        DLOG("case (ii): %s", path);
         free(full_path);
         delete (statbuf_local);
         delete (statbuf_remote);
@@ -301,6 +303,7 @@ bool is_fresh(void *userdata, const char *path) {
     delete (statbuf_local);
     delete (statbuf_remote);
 
+    DLOG("not fresh: %s", path);
     return false;
 }
 
@@ -350,7 +353,7 @@ int download_file(void *userdata, const char *path) {
 
     // Lock
     rpc_ret = lock(path, RW_READ_LOCK);
-
+    
     if (rpc_ret < 0) {
         fxn_ret = rpc_ret;
         delete (statbuf_remote);
@@ -558,7 +561,7 @@ int upload_file(void *userdata, const char *path) {
     // --- Open local file for reading and writing ---
 
     // the file descriptor shall not share it with any other process in the system.
-    int fileDesc_local = open(full_path, O_RDWR); // we need to write T_client later.
+    int fileDesc_local = open(full_path, O_RDONLY);
 
     if (fileDesc_local == -1) {
         // failed to open file.
@@ -840,7 +843,6 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
                 DLOG("watdfs_cli_getattr: failed to download file '%s'", path);
                 // free memories
                 free(full_path);
-                // exit
                 return rpc_ret;
             }
         } else {
@@ -880,7 +882,7 @@ int watdfs_cli_getattr(void *userdata, const char *path, struct stat *statbuf) {
         return fxn_ret;
     }
 
-    return rpc_ret;
+    return fxn_ret;
 }
 
 // CREATE, OPEN AND CLOSE
@@ -1051,7 +1053,6 @@ int watdfs_cli_open(void *userdata, const char *path, struct fuse_file_info *fi)
             DLOG("watdfs_cli_getattr: Failed to update local file '%s'", path);
             return fxn_ret;
         }
-        
 
         // Opening a file should also initialize metadata at the client that is needed to check the freshness condition
         // for the file ( Tc). You can use the file modification time of the file to track T_client and T_server.
@@ -1152,6 +1153,7 @@ int watdfs_cli_release(void *userdata, const char *path, struct fuse_file_info *
             // watdfs_cli_release is responsible for transferring a writable file from the client to
             // server and unlocking it.
 
+            DLOG("watdfs_cli_release: uploading file '%s'", path);
             rpc_ret = upload_file(userdata, path);
 
             if (rpc_ret < 0) {
@@ -1219,15 +1221,12 @@ int watdfs_cli_read(void *userdata, const char *path, char *buf, size_t size,
             DLOG("watdfs_cli_read: file %s opened in RDONLY mode", path);
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
-            if (!is_fresh(userdata, path)) {
-                // note download_file updates Tc.
-                rpc_ret = download_file(userdata, path);
-                if (rpc_ret < 0) {
-                    // download cache fail
-                    DLOG("watdfs_cli_read failed to cache file '%s' info.", path);
-                    fxn_ret = rpc_ret;
-                    return fxn_ret;
-                }
+            rpc_ret = update_file(userdata, path);
+
+            if (rpc_ret < 0) {
+                fxn_ret = rpc_ret;
+                DLOG("watdfs_cli_truncate: Failed to update local file '%s'", path);
+                return fxn_ret;
             }
 
         } else {
@@ -1307,7 +1306,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
             DLOG("watdfs_cli_write succeed to write to cache file '%s'", path);
 
             // update Tc
-            update_Tc(userdata, path);
+            // update_Tc(userdata, path);
 
             // freshness check
             if (!is_fresh(userdata, path)) {
@@ -1385,7 +1384,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
     }
 
     // update Tc
-    update_Tc(userdata, path);
+    // update_Tc(userdata, path);
 
     // freshness check
     if (!is_fresh(userdata, path)) {
@@ -1420,14 +1419,14 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
 
     if (metadata == NULL) {
         // --- File not opened ---
-        DLOG("watdfs_cli_truncate: File '%s' not opened", path);
+        DLOG("watdfs_cli_fstnc: File '%s' not opened", path);
         return -EPERM; /* operation not permitted */
     } else {
         // --- File opened ---
         if ((metadata->client_flag & O_ACCMODE) == O_RDONLY) {
             // Only read calls are allowed and should perform freshness
             // checks before reads, as usual. Write calls should fail and return -EMFILE.
-            DLOG("watdfs_cli_truncate: cannot write read only file '%s'", path);
+            DLOG("watdfs_cli_fsync: cannot write read only file '%s'", path);
             return -EMFILE; /* Too many open files */
         } else {
             // Read calls should not perform freshness checks, as there
@@ -1435,7 +1434,6 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
             // overwriting local file updates if freshness condition has expired.
             // Write calls should perform the freshness checks at the end of writes, as usual.
 
-            // interestingly we will open the file again in O_RDWR again
             rpc_ret = upload_file(userdata, path);
 
             if (rpc_ret < 0) {
@@ -1446,7 +1444,7 @@ int watdfs_cli_fsync(void *userdata, const char *path, struct fuse_file_info *fi
             }
 
             // update Tc
-            update_Tc(userdata, path);
+            // update_Tc(userdata, path);
         }
     }
     // Return, we are done
@@ -1513,7 +1511,7 @@ int watdfs_cli_utimensat(void *userdata, const char *path, const struct timespec
     DLOG("watdfs_cli_utimensat: Now update Tc on file %s.", path);
 
     // update Tc
-    update_Tc(userdata, path);
+    // update_Tc(userdata, path);
 
     // freshness check
     if (!is_fresh(userdata, path)) {
