@@ -579,7 +579,16 @@ int watdfs_lock(int *argTypes, void **args) {
     }
 
     // now lock exists.
-    DLOG("watdfs_lock trying to acquire lock on file %s", short_path.c_str());
+    switch (mode)
+    {
+    case RW_READ_LOCK:
+        DLOG("watdfs_lock trying to acquire READ lock on file %s", short_path.c_str());
+        break;
+    
+    default:
+        DLOG("watdfs_lock trying to acquire WRITE lock on file %s", short_path.c_str());
+        break;
+    }
     // try to acquire the lock in the given mode
     sys_ret = rw_lock_lock(it->second, mode);
 

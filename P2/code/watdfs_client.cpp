@@ -351,16 +351,6 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // Lock
-    rpc_ret = lock(path, RW_READ_LOCK);
-    
-    if (rpc_ret < 0) {
-        fxn_ret = rpc_ret;
-        delete (statbuf_remote);
-        DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
-        return fxn_ret;
-    }
-
     // --- Read file from server ---
     // firstly open file from server, we know it exists since we getattr.
     struct fuse_file_info *fi = new struct fuse_file_info;
@@ -379,6 +369,16 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
+    // Lock
+    rpc_ret = lock(path, RW_READ_LOCK);
+    
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        delete (statbuf_remote);
+        DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
+
     // read file into
     char *buf_content = new char[statbuf_remote->st_size];
     rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
@@ -394,6 +394,16 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
+    // Unlock
+    rpc_ret = unlock(path, RW_READ_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        delete (statbuf_remote);
+        DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
+
     // --- Release server file ---
     rpc_ret = rpc_release(userdata, path, fi);
 
@@ -405,16 +415,6 @@ int download_file(void *userdata, const char *path) {
         delete (fi);
         delete (statbuf_remote);
         delete (buf_content);
-        return fxn_ret;
-    }
-
-    // Unlock
-    rpc_ret = unlock(path, RW_READ_LOCK);
-
-    if (rpc_ret < 0) {
-        fxn_ret = rpc_ret;
-        delete (statbuf_remote);
-        DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
 
@@ -1384,9 +1384,10 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
     }
 
     // update Tc
-    // update_Tc(userdata, path);
+    update_Tc(userdata, path);
 
     // freshness check
+    /*
     if (!is_fresh(userdata, path)) {
         DLOG("watdfs_cli_truncate: upload file '%s'", path);
         rpc_ret = upload_file(userdata, path);
@@ -1398,6 +1399,7 @@ int watdfs_cli_truncate(void *userdata, const char *path, off_t newsize) {
             return fxn_ret;
         }
     }
+    */
 
     // Return, we are done
     return fxn_ret;
