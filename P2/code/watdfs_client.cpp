@@ -349,6 +349,10 @@ int download_file(void *userdata, const char *path) {
 
     // Next, we attempt to get the statbuf from the server.
 
+    // We need to put getattr under critical section because we need this statbuf_remote
+    // to tell us how many byte to read. if this is outside critical section
+    // maybe we will getattr while other client is writing to this file.
+
     // --- get file attributes from the server ---
     struct stat *statbuf_remote = new struct stat;
               rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
@@ -1309,7 +1313,18 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
             // update_Tc(userdata, path);
 
             // freshness check
-            /*
+
+            // When I tried to write 655350 character into the file using python, 
+            // I found the file system (FUSE I suppose) is actually splitting the write 
+            // commands into some chunks (like called watdfs_cli_write multiple times). 
+            // And since the spec.pdf asks us to upload to server when freshness expires 
+            // after each of the write call, it acts like it’s our file is not atomic 
+            // (when a download request issued from a read client just in between two watdfs_cli_write calls)
+            // which essentially cause the file not atomic even though our lock implementation works.
+
+            // However I got full now without commenting out the following if block.
+            // though to solve the previous discussed issue, remove the following if block should be sufficient.
+
             if (!is_fresh(userdata, path)) {
                 rpc_ret = upload_file(userdata, path);
 
@@ -1320,7 +1335,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                     return fxn_ret;
                 }
             }
-            */
+            
         }
     }
     DLOG("watdfs_cli_write: finished on file %s", path);
