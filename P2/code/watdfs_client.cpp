@@ -338,13 +338,23 @@ int download_file(void *userdata, const char *path) {
     }
     */
 
+    // Lock
+    int rpc_ret = lock(path, RW_READ_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
+        return fxn_ret;
+    }
+
     // Next, we attempt to get the statbuf from the server.
 
     // --- get file attributes from the server ---
     struct stat *statbuf_remote = new struct stat;
-    int          rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
+              rpc_ret        = rpc_getattr(userdata, path, statbuf_remote);
 
     if (rpc_ret < 0) {
+        unlock(path, RW_READ_LOCK); // release lock, don't bother to check result
         fxn_ret = -errno;
         delete (statbuf_remote);
         DLOG("RPC failed on rpc_getattr file %s with error code %d", path, errno);
@@ -369,16 +379,6 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // Lock
-    rpc_ret = lock(path, RW_READ_LOCK);
-    
-    if (rpc_ret < 0) {
-        fxn_ret = rpc_ret;
-        delete (statbuf_remote);
-        DLOG("RPC failed on getting read lock on file %s with error code %d", path, fxn_ret);
-        return fxn_ret;
-    }
-
     // read file into
     char *buf_content = new char[statbuf_remote->st_size];
     rpc_ret           = rpc_read(userdata, path, buf_content, statbuf_remote->st_size, 0, fi);
@@ -394,16 +394,6 @@ int download_file(void *userdata, const char *path) {
         return fxn_ret;
     }
 
-    // Unlock
-    rpc_ret = unlock(path, RW_READ_LOCK);
-
-    if (rpc_ret < 0) {
-        fxn_ret = rpc_ret;
-        delete (statbuf_remote);
-        DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
-        return fxn_ret;
-    }
-
     // --- Release server file ---
     rpc_ret = rpc_release(userdata, path, fi);
 
@@ -415,6 +405,16 @@ int download_file(void *userdata, const char *path) {
         delete (fi);
         delete (statbuf_remote);
         delete (buf_content);
+        return fxn_ret;
+    }
+
+    // Unlock
+    rpc_ret = unlock(path, RW_READ_LOCK);
+
+    if (rpc_ret < 0) {
+        fxn_ret = rpc_ret;
+        delete (statbuf_remote);
+        DLOG("RPC failed on releasing read lock on file %s with error code %d", path, fxn_ret);
         return fxn_ret;
     }
 
@@ -1309,6 +1309,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
             // update_Tc(userdata, path);
 
             // freshness check
+            /*
             if (!is_fresh(userdata, path)) {
                 rpc_ret = upload_file(userdata, path);
 
@@ -1319,6 +1320,7 @@ int watdfs_cli_write(void *userdata, const char *path, const char *buf,
                     return fxn_ret;
                 }
             }
+            */
         }
     }
     DLOG("watdfs_cli_write: finished on file %s", path);
