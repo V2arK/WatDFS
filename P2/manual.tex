@@ -1,0 +1,247 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstset{frame=tb,
+  language=c++,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=flexible,
+  basicstyle={\small\ttfamily},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{teal},
+  commentstyle=\color{cyan},
+  stringstyle=\color{pink},
+  numberstyle=\tiny\color{gray}, % the style that is used for the line-numbers
+  rulecolor=\color{black},   
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+  morekeywords={Vertex, Array, Dict, append, pop, empty, in, length, remove, Job, Iterator, size}
+}
+
+% Set page margins
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+% Set up code listing style
+\lstset{
+    basicstyle=\ttfamily,
+    frame=single,
+    breaklines=true,
+    postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
+}
+
+\title{WATDFS Manual}
+\author{Honglin Cao}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+
+\section{Design Choices}
+
+\subsection{Userdata}
+
+Firstly, the \texttt{Userdata} is structured as follows:
+\begin{lstlisting}
+struct Metadata {
+    int      client_flag;
+    int      fileDesc_client;
+    uint64_t fileHandle_server;
+
+    // Constructor
+    Metadata(int flag, int fd_client, uint64_t fh_server) :
+        client_flag(flag), fileDesc_client(fd_client), fileHandle_server(fh_server) {
+        // Initialization list sets the values of the members
+    }
+};
+
+// global variables
+struct Userdata {
+    char  *cache_path;
+    time_t cache_interval;
+    // short path -> metadata
+    std::map<std::string, time_t>          Tc;
+    std::map<std::string, struct Metadata> files_opened;
+};
+\end{lstlisting}
+
+where \texttt{cache\_path} stores the path for cache directory (where files are cached), and \texttt{cache\_interval} is the freshness interval \texttt{t} as outlined in \texttt{spec.pdf}.
+
+The map \texttt{file\_opened} stores the \texttt{Metadata} of the opened (not yet closed) files (upon \texttt{release}, the entry is removed from the map), where the \texttt{Metadata} contains the flags files are opened with, the file descriptor returned by \texttt{open()} function call on the local cached file, and the file handle returned by \texttt{open()} function call on the server side.
+
+The file handle (\texttt{fh}) for opened files on the server side is kept in the output variable \texttt{fi} of \texttt{watdfs\_cli\_open()}, to ensure the behaviour is the same as P1.
+%for easier operation on remote files, rather than needing to find such information through \texttt{Userdata->file\_opened->fileHandle\_server}.
+
+\subsection{Mutual Exclusion}
+
+On the server-side, we have the following global map and related structures:
+
+\begin{lstlisting}
+ enum class OpType {
+    RD, // read
+    WR  // write (possibly also read)
+};
+
+// short path : lock * / OpType
+std::map<std::string, OpType>    global_open_info;	
+\end{lstlisting}
+
+And for every call to server-side \texttt{open()}, it check whether a given path has already been opened in write mode (\texttt{OpType::WR}), if it's then reject with \texttt{-EACCES} if the request to open is in write mode, and allow a read mode open regardless of modes of already opened session. 
+
+And if there is no entry for a given file, we just create the entry with \texttt{OpType::WR} for write mode and \texttt{OpType::RD} for read mode and return success for the \texttt{open()} function call.
+
+ This ensures that only one client is allowed to open a file under write mode at any time, which ensured the \textbf{mutual exclusion of write open}.
+
+As for every call to server-side \texttt{release()}, it simply change the open type from write mode (\texttt{OpType::WR}) to read mode (\texttt{OpType::RD}) if it's releasing an opened file under write mode (since we ensured only one client is opening a file on write mode at any given time with \texttt{open()}), and doesn't do anything if it's releasing a read mode open. 
+
+We don't remove entry on \texttt{global\_open\_info} upon \texttt{release()} since it doesn't really matter for the \texttt{open()} if an entry doesn't exist or it exists with read mode \texttt{OpType::RD}.
+
+\subsection{Atomic file transfers}
+
+Firstly, we defined a global map on the server-side to store locks for each file:
+\begin{lstlisting}
+// short path : lock * / OpType
+std::map<std::string, rw_lock *> global_lock_info;
+\end{lstlisting}
+
+For every function call from client-side function \texttt{lock(const char *path, rw\_lock\_mode\_t mode)} to server-side function \texttt{watdfs\_lock}, the function check if a lock were created to the given path (it will create one if there isn't), and tries to acquire it in the given mode, and for every function call from client-side function \texttt{unlock(const char *path, rw\_lock\_mode\_t mode)} to server-side function \texttt{watdfs\_unlock}, the functions release the lock on the given path (Only destroy these lock upon server destroy to save computation on memory alloc / dealloc).
+
+\subsubsection{Copy a file from the client to server}
+
+The main function to handle the copy of a file from the client to the server is called \texttt{upload\_file()}. Because this function is called on all functions that needed to update to server, and all such functions all requires the file to be opened under \textbf{write mode} already, \texttt{upload\_file()} also requires the file be opened under \textbf{write mode} to prevent "dead lock"(not the \texttt{rw\_lock}, but the mutual exclusion of open for writes) on trying to open the file again under write mode.
+
+In this function, we firstly get the \texttt{stat} from the cached file to determine number of byte to read, then opens the local cached file under \textbf{read only mode} (we could use \texttt{fileDesc\_client} in \texttt{Metadata} since the file is opened), read all content and close. We can be certain that the cache file were not changed in between we get the \texttt{stat} and the actual the \texttt{read} because we already assert that the file are opened under \textbf{write mode}, and our \textbf{open()} will return \texttt{-EMFILE} when another attempt was made to open the same file under \textbf{write mode} before we close the file, so we know that only the process thats currently calling \texttt{upload\_file()} is the process opened the file under \textbf{write mode}. 
+
+Then, we obtain the corresponding write lock on the server side for this file, and we truncate the file to 0 byte, and write the entire content of local cached file into it starting with offset = 0, then we release the write lock. The use of critical section for truncate and write ensures the upload of files are \textbf{atomic} with our guarantee that the cache file were not changed in between we get the \texttt{stat} and the actual the \texttt{read}.
+
+\subsubsection{Copy a file from the server to client}
+
+The main function to handle the copy of a file from the server to the client is called \texttt{download\_file()}. This function doesn't require the file to be opened in any mode, as functions like \texttt{getattr} will attempt to call this function to cache remote file.
+
+This function first lock the file it's trying to download on the server, then \texttt{getattr} on the remote file to make sure the file exists as well as getting the length it, then \texttt{open} the file in read-only mode and read the file.  Then it \texttt{release} the remote file and unlock the file.
+
+The main reason we wrap \texttt{getattr} in critical section is to ensure the file content is not changed in between we get the remote file's length and when we start to read it. In some corner cases, without putting \texttt{getattr} in critical sections some other client will change the file content in between the \texttt{getattr} and \texttt{read}, which caused the downloaded file to be incorrect and containing some garbled data.
+
+After unlocking, we simply attempt to open the local cache file in \textbf{write mode} (if not exist then create first then open in write mode), then \texttt{truncate} the cache file to length 0 and dump the content read from server to  the cache file. Note that only one client is allowed to open the local cache file in \textbf{write mode}, so combined with our use of critical section for the remote file we guaranteed the download of the file is \textbf{atomic}.
+
+\subsection{Cache Invalidation}
+
+Firstly, we have a map in \texttt{Userdata} called \texttt{Tc} (please check 1.1), which stores the time of the cache entry outlined by the key (path to the file) was last validated by the client. This path is relative to the cache path defined as \texttt{Userdata->cache\_path} to save memory space.
+
+Next, we have a function called \texttt{Update\_Tc(path)} that update the \texttt{Tc} for a given file outlined in the variable \texttt{path} to the current client time using function \texttt{time()}. And if an entry not exists for the given path, we create an entry then set to current time.
+
+Lastly, function \texttt{upload\_file()} will update the remote file to match last access / modify time of the local cached file and \texttt{download\_file()} will update the local cache file to match last access / modify time of the remote file.
+
+My design is to only call \texttt{Update\_Tc()} up on successfully returning on function \texttt{upload\_file()} and \texttt{download\_file()}, which is where we validates files on the client. Then, for every write calls (after finish the operation to cache), if freshness condition expires (not [\texttt{(T - Tc) < T} ] nor [\texttt{T\_client == T\_server}]), we call \texttt{upload\_file()} upload the change and update \texttt{Tc} (for \texttt{fsync} and \texttt{release}, we don't check freshness and call \texttt{upload\_file()} directly); 
+
+And for every read calls (when file is not opened under write mode), if freshness condition expires (not [\texttt{(T - Tc) < T} ] nor [\texttt{T\_client == T\_server}]), we call \texttt{download\_file()} prior to apply the operations to the local cached file.
+
+Also, note that if an entry is not exist in map \texttt{Tc}, then the freshness condition is considered expired, and an entry will be created up on finishing \texttt{upload\_file()} and \texttt{download\_file()}.
+
+This way, we ensured that \texttt{Tc} is only updated if we actually validated it (either through upload to server or download from server), and \texttt{T\_client} are \texttt{T\_server} correctly updated as well, which means our implement of cache invalidatation is sound.
+ 
+\section{Unimplemented Functionalities}
+
+I've implemented all features as outlined in the Project specification, but there are one extra feature I would like to implement given enough time: support to \texttt{ls}. However, I looked into it but it seems not really possible with the current defined class header for \texttt{watdfs\_server}.
+
+\section{Error Codes}
+Other than error codes returned from system calls directly, there are several error codes I returned:
+
+\begin{itemize}
+	\item{-EEXIST}: for \texttt{watdfs\_cli\_mknod} when the given file is already been opened by checking \texttt{Userdata}, or existed on the server by \texttt{getattr}.
+	\item{-EMFILE}: for \texttt{watdfs\_cli\_open} when the given file is already been opened by checking \texttt{Userdata}; 
+	
+	\texttt{upload\_file}, \texttt{watdfs\_cli\_utimensat}, \texttt{watdfs\_cli\_write}, \texttt{watdfs\_cli\_truncate} and\\ \texttt{watdfs\_cli\_fsync} when the file is opened in \texttt{read only mode}.
+	
+	\item{-EPERM}: \texttt{watdfs\_cli\_write}, \texttt{watdfs\_cli\_read} and \texttt{watdfs\_cli\_fsync} when the file is not opened.
+	
+	\item{-ENOENT}: \texttt{watdfs\_cli\_open} when file not exist on server by \texttt{getattr}. (not really useful because FUSE calles \texttt{getattr} prior to \texttt{open})
+\end{itemize}
+
+\section{Testing Methodologies}
+
+The testing for trivial single client single server functionalities like create an existing file, write to existing file etc are done just manually by input into terminals, so these will not be described to save time, and also because they are quite trivial. Usually just interact with the client directory using command like \texttt{touch <file>}, \texttt{echo blabla > <file>}, \texttt{echo blabla >> <file>} and \texttt{cat <file>}.
+
+For testing for some corner cases like if local cache exists but not validated (no \texttt{Tc}), I will first shutdown the client, manually create the cache file in cache directory, then bring up the client then tries to interact with the file in the client directory.
+
+For testing testing some forbidden corner case such as creating (\texttt{touch} file) that already exists, I just try to \texttt{touch} the file twice on the client folder.
+
+\subsection{atomic of file read and write (python multithread testing)}
+Firstly, I start one server, and two client in the same machine. The two client uses \texttt{/tmp/h45cao/client} and \texttt{/tmp/h45cao/client2} as mount point respectively. Then, I write the following python code to start two threads, where one change the file content on the first client to 2 different very long string periodically every 5 second, and another thread check the file content on the second client to be either one of the very long string every 1 second.
+
+\begin{lstlisting}
+import threading
+import time
+
+# Define the two very long strings
+string1 = 'a' * 655350  # A string of length 655350
+string2 = 'b' * 700000  # A string of length 700000
+
+# Define the path to the file
+file_path = "/tmp/h45cao/client/atomic.txt"
+file_path_check = "/tmp/h45cao/client1/atomic.txt"  
+# Assuming this is the intended path to check
+
+# This function will alternate between writing string1 and string2 to the file
+def write_strings_periodically():
+    current_string = string1
+    while True:
+        with open(file_path, 'w') as file:
+            file.write(current_string)
+            file.close()
+        # Switch between string1 and string2
+        current_string = string2 if current_string == string1 else string1
+        time.sleep(5)  # Wait for 5 seconds before switching
+
+# This function will check the file content every second
+def check_file_content():
+    while True:
+        try:
+            with open(file_path_check, 'r') as file:
+                content = file.read()
+                if content not in [string1, string2]:
+                    print("content does not match any.")
+                    print(content)
+                    print(f"Current file content length: {len(content)}")  
+                    # Print the length of the content
+                else:
+                    print("matches")
+                file.close()
+        except FileNotFoundError:
+            print("The file was not found.")
+        time.sleep(1)  # Check every second
+
+# Create and start the threads
+thread_writer = threading.Thread(target=write_strings_periodically)
+thread_checker = threading.Thread(target=check_file_content)
+
+thread_writer.start()
+thread_checker.start()
+\end{lstlisting}
+
+This  test is run for a few minute, and it catches a issue that the current release test isn't catching by catching a the file content is not the same to either once, and my investigation shows: 
+
+When I tried to write very long strings into the file using python, the file system (FUSE I suppose) is actually splitting the write commands into some chunks (called \texttt{watdfs\_cli\_write} multiple times).
+
+And since the spec.pdf asks us to upload to server when freshness expires after each of the write call, it acts like it is our file upload/download not actually atomic (when a download request issued from a read client just in between two \texttt{watdfs\_cli\_write} calls) which essentially cause the file not atomic even though our lock implementation works.
+
+My thought into solving this is to this is to remove (freshness check + upload) under \texttt{watdfs\_cli\_write}. But since I got full on release tesks, I didn't do it.
+
+\subsection{Method 2: Mutual exclusion of write open (python+manual testing)}
+
+Due to the fact that we cannot really open a file in write mode and let it sits there without it being released directly, I wrote a python script that open the file in write mode, and sleep for 10 second. During this 10 second, I tried to echo content into the same file (same client), and I got \texttt{-EMFILE}, but when i tried to cat the content (will cause the system to open in read mode), there is no error and file content is available, which means the mutual exclusion of write open is sound.
+
+
+\end{document}

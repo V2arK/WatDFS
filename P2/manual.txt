@@ -1,0 +1,13 @@
+Please generate some code snippet for generating a Manual for watdfs (as a PDF document, around 3-4 pages). It should include the following items: 
+1. You should discuss your design choices so that we can understand how key functionality was implemented. These include all the steps you take to copy a file from the client to server and vice-versa, how the transfers are atomic, all the steps to test for cache invalidation and how you ensure mutual exclusion at client and server. Each of these functionalities’ discussions are marked separately; you should complete all the sections.
+- copy a file from the client to server:
+- copy a file from server to client:
+- How transfers are atomic:
+- steps to test for cache invalidation:
+- How you ensure mutual exclusion:
+
+2: Clearly identify the functionalities of the project that has not been implemented and how you’d finish it. You will receive marks based on these descriptions, even if your code is incomplete.
+
+3 List the error codes that you returned (outside of error codes returned from system calls directly)
+
+4 You should discuss (with steps) at least 2 different ways in which you tested your project (e.g., describe a series of system calls that you have made to ensure your  project works)
