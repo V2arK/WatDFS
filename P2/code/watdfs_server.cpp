@@ -570,6 +570,8 @@ int watdfs_lock(int *argTypes, void **args) {
         if (sys_ret < 0) {
             *ret = -errno;
             DLOG("Failed to create lock on file %s with errno %d", short_path.c_str(), errno);
+            // The RPC call succeeded, so return 0.
+            return 0;
         }
 
         // get lock again
@@ -577,7 +579,16 @@ int watdfs_lock(int *argTypes, void **args) {
     }
 
     // now lock exists.
-    DLOG("watdfs_lock trying to acquire lock on file %s", short_path.c_str());
+    switch (mode)
+    {
+    case RW_READ_LOCK:
+        DLOG("watdfs_lock trying to acquire READ lock on file %s", short_path.c_str());
+        break;
+    
+    default:
+        DLOG("watdfs_lock trying to acquire WRITE lock on file %s", short_path.c_str());
+        break;
+    }
     // try to acquire the lock in the given mode
     sys_ret = rw_lock_lock(it->second, mode);
 
@@ -585,8 +596,6 @@ int watdfs_lock(int *argTypes, void **args) {
         *ret = -errno;
         DLOG("Failed to obtain lock on file %s with errno %d", short_path.c_str(), errno);
     }
-
-    // successfully Obtain lock.
 
     // The RPC call succeeded, so return 0.
     return 0;
@@ -616,8 +625,9 @@ int watdfs_unlock(int *argTypes, void **args) {
     if (it == global_lock_info.end()) { // non exist
         *ret = -EPERM;                  // operation not permitted
         DLOG("Failed to unlock file %s, lock DNE", short_path.c_str());
+        // The RPC call succeeded, so return 0.
+        return 0;
     }
-    // now lock exists.
 
     // try to unlock the lock in the given mode
     sys_ret = rw_lock_unlock(it->second, mode);
